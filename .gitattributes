@@ -1,0 +1,3 @@
+# Patch files are byte-exact: never normalise their line endings.
+patches/**/*.patch -text linguist-generated
+smoke/pdfium/fixtures/*.pdf binary

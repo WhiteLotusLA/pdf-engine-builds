@@ -1,0 +1,4 @@
+# The self-tests pass $(...) results to a check function on purpose (SC2046).
+external-sources=true
+source-path=SCRIPTDIR
+disable=SC2046

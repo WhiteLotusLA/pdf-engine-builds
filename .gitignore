@@ -1,0 +1,5 @@
+.DS_Store
+# Build trees and outputs (scripts write here; nothing in these folders is committed)
+work/
+dist/
+*.log
