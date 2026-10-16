@@ -1,0 +1,62 @@
+name: lint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and self-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install actionlint 1.7.12 (checksum pinned)
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/actionlint"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          mkdir -p "$dir"
+          gh release download "v${ACTIONLINT_VERSION}" --repo rhysd/actionlint --pattern "$archive" --dir "$dir"
+          echo "${ACTIONLINT_SHA256}  $dir/$archive" | sha256sum -c -
+          tar -xzf "$dir/$archive" -C "$dir" actionlint
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Make sure shasum exists (the scripts use it on macOS and Linux)
+        run: command -v shasum >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends libdigest-sha-perl
+
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          # smoke/ only exists from task A2 on; find fails on a missing directory.
+          dirs="scripts"
+          if [ -d smoke ]; then dirs="scripts smoke"; fi
+          find $dirs -name '*.sh' -print0 | xargs -0 shellcheck -S warning
+
+      - name: actionlint (shellcheck of inline blocks is off, scripts are shellchecked above)
+        run: actionlint -color -shellcheck=
+
+      - name: Workflow policy (pinned actions, read-only permissions, standard runners)
+        run: scripts/check-workflows.sh
+
+      - name: Commit identity (public repo, noreply address only)
+        if: github.event_name == 'push'
+        run: scripts/check-commit-identity.sh
+
+      - name: Self-tests
+        run: |
+          for t in scripts/tests/*-test.sh; do
+            echo "== $t"
+            bash "$t"
+          done
