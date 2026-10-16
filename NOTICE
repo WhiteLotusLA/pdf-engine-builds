@@ -1,0 +1,33 @@
+pdf-engine-builds
+Copyright 2026 WhiteLotusLA
+
+The scripts, workflows and patch files written for this repository are licensed under the Apache License,
+Version 2.0 (see LICENSE). This repository builds and redistributes the following third-party software, which
+keeps its own license:
+
+PDFium
+  Copyright The PDFium Authors. BSD-3-Clause, with bundled third-party components under their own licenses
+  (FreeType under the FreeType License, ICU, libjpeg-turbo, lcms, OpenJPEG, zlib, abseil and others).
+  The complete notices of what is linked are shipped as LICENSES.zip with each release.
+  https://pdfium.googlesource.com/pdfium/
+
+EmbedPDF runtime (patch series under patches/embedpdf/)
+  Copyright 2025-2026 CloudPDF LTD. Files marked SPDX-License-Identifier: Apache-2.0 are licensed under the
+  Apache License 2.0. Files derived from PDFium keep PDFium's BSD-style license and attribution.
+  The patch files are generated from, and changed relative to, https://github.com/embedpdf/runtime
+  (not affiliated with or endorsed by Google). Each patch file records the source commit in its header.
+
+pdfium-binaries (patches under patches/pdfium-binaries/, build recipe followed by scripts/)
+  Copyright Benoit Blanchon. MIT License. https://github.com/bblanchon/pdfium-binaries
+
+Skia (a small patch from the EmbedPDF runtime applies to Skia's path code)
+  Copyright Google Inc. BSD-3-Clause. https://skia.org/
+
+qpdf
+  Copyright Jay Berkenbilt and contributors. Apache License 2.0. https://github.com/qpdf/qpdf
+
+libjpeg-turbo
+  Copyright The libjpeg-turbo Project and contributors. IJG, BSD-3-Clause and zlib licenses.
+  https://github.com/libjpeg-turbo/libjpeg-turbo
+
+"PDFium" and "Chromium" are trademarks of Google LLC. This repository is not affiliated with or endorsed by Google.
