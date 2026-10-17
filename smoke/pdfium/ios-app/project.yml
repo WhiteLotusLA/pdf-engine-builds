@@ -43,6 +43,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.perfectbalance.enginebuilds.pdfiumsmoke
         TARGETED_DEVICE_FAMILY: "2"
         OTHER_LDFLAGS: "$(inherited) -lc++"
+        # Xcode 27 splits Debug app code into PDFiumSmoke.debug.dylib by default; run.sh looks for PDFium symbols in the app binary.
+        ENABLE_DEBUG_DYLIB: "NO"
     dependencies:
       - framework: ../../../dist/PDFium.xcframework
         embed: false

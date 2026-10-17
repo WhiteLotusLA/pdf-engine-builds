@@ -39,6 +39,7 @@ check "the fixture PDF is a bundle resource" $(grep -q 'three-pages.pdf in Resou
 check "the unit test target is hosted by the app" $(grep -q 'TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PDFiumSmoke.app/PDFiumSmoke";' "$PBX"; echo $?)
 check "the unit test target can load the PDFium module map" $(grep -q 'SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../../../dist/PDFium.xcframework/ios-arm64-simulator/Headers";' "$PBX"; echo $?)
 check "code signing is off for every configuration" $(grep -q 'CODE_SIGNING_ALLOWED = NO;' "$PBX" && ! grep -q 'CODE_SIGNING_ALLOWED = YES;' "$PBX"; echo $?)
+check "the debug dylib split is off so PDFium symbols stay in the app binary" $(grep -q 'ENABLE_DEBUG_DYLIB = NO;' "$PBX" && ! grep -q 'ENABLE_DEBUG_DYLIB = YES;' "$PBX"; echo $?)
 check "the scheme builds and tests both targets" $(grep -q 'PDFiumSmokeTests' "$APP/PDFiumSmoke.xcodeproj/xcshareddata/xcschemes/PDFiumSmoke.xcscheme"; echo $?)
 
 if [ "$failures" -gt 0 ]; then
