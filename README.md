@@ -69,3 +69,19 @@ Push a tag of the form `v<major>.<minor>.<patch>-pdfium<NNNN>[-stock][-macos-onl
 - `scripts/pdfium-tests.sh` builds and runs the fork's own tests (redaction, forms, signatures are the gate).
 
 To move the pins: change `PDFIUM_BRANCH`, `EMBEDPDF_COMMIT` and `EMBEDPDF_UPSTREAM_BASE` in `versions.env` together. The base is the upstream PDFium parent of the fork's newest upstream sync merge into the commit, a merge whose message reads either "Update PDFium" or "Merge commit '<sha>' into embedpdf/sync/<sha>"; neither the export script's guards (no `public/epdf_redact.h`, an ancestor of `EMBEDPDF_COMMIT`) nor the control experiment can tell a newest base from an older one, because any older upstream ancestor passes both. Cross-check it by hand instead: the message of the fork's newest sync pull request ("merge upstream PDFium up to <sha>") and its newest sync record, `docs/embedpdf/syncs/<date>-<sha9>.md` in the fork, must name the same base. Then run the export and the control, commit the new series, and read the patch report of the next CI run. `docs/patch-reports/` keeps the reports of past runs (file names and counts only).
+
+## PDFium slices
+
+`PDFium.xcframework` holds static libraries for three slices, all built from the same pinned PDFium branch
+and (for releases) the same EmbedPDF patch series:
+
+| Slice identifier | Built by | Used for |
+|---|---|---|
+| `macos-arm64` | `scripts/pdfium-build.sh macos-arm64` | the Mac app and `pdfe` |
+| `ios-arm64` | `scripts/pdfium-build.sh ios-arm64` | iPad and iPhone hardware |
+| `ios-arm64-simulator` | `scripts/pdfium-build.sh iossim-arm64` | the iOS simulator on Apple silicon |
+
+The iOS slices need pdfium-binaries' iOS patch (`patches/pdfium-binaries/`, MIT, provenance in its header).
+The libraries are static, so nothing is embedded in an app: the app target links the XCFramework.
+`scripts/verify-xcframework.sh` checks a framework's slices, architecture, headers, platform and minimum OS.
+`smoke/pdfium/ios-app` is an iPad-only app that links the framework; CI runs its tests on an iPad simulator.

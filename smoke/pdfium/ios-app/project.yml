@@ -1,0 +1,79 @@
+name: PDFiumSmoke
+
+# A minimal iPad-only app that links dist/PDFium.xcframework and counts the pages of a bundled
+# PDF. CI runs `xcodebuild test` on an iPad simulator (simulator slice) and `xcodebuild build`
+# for a generic iOS device with signing off (device slice). Generated project is not committed.
+options:
+  bundleIdPrefix: com.perfectbalance.enginebuilds
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "27.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    TARGETED_DEVICE_FAMILY: "2"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: "NO"
+
+targets:
+  PDFiumSmoke:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/App
+      - path: Fixtures
+        buildPhase: resources
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        CFBundleDisplayName: PDFium Smoke
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.perfectbalance.enginebuilds.pdfiumsmoke
+        TARGETED_DEVICE_FAMILY: "2"
+        OTHER_LDFLAGS: "$(inherited) -lc++"
+    dependencies:
+      - framework: ../../../dist/PDFium.xcframework
+        embed: false
+      - sdk: CoreFoundation.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreText.framework
+      - sdk: Foundation.framework
+      - sdk: UIKit.framework
+
+  PDFiumSmokeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Sources/Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.perfectbalance.enginebuilds.pdfiumsmoke.tests
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: "YES"
+        # @testable import PDFiumSmoke loads the app's internal PDFium import, so the module map must be
+        # visible here. Tests run only on the simulator; the headers are the same in every slice.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/../../../dist/PDFium.xcframework/ios-arm64-simulator/Headers
+    dependencies:
+      - target: PDFiumSmoke
+
+schemes:
+  PDFiumSmoke:
+    build:
+      targets:
+        PDFiumSmoke: all
+        PDFiumSmokeTests: [test]
+    test:
+      targets:
+        - PDFiumSmokeTests

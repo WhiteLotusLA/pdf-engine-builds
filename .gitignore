@@ -3,3 +3,6 @@
 work/
 dist/
 *.log
+smoke/pdfium/ios-app/*.xcodeproj/
+smoke/pdfium/ios-app/Sources/App/Info.plist
+out/
