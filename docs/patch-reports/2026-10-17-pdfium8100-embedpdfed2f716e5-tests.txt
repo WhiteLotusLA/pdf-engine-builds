@@ -1,0 +1,6 @@
+pdfium-tests summary (PDFium chromium/8100, EmbedPDF ed2f716e5381e34f096cc1e50e4259a55998d391)
+gate-unit: 26 tests, 0 failed, 0 disabled
+gate-embedder: 140 tests, 0 failed, 0 disabled
+info-embedder: 578 tests, 1 failed, 0 disabled
+  FAILED EPDFMeasureEmbedderTest.CaptionAppearanceGolden
+info-unit: 1269 tests, 0 failed, 0 disabled

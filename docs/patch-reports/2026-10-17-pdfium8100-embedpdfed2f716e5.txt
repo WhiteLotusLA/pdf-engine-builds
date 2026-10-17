@@ -1,0 +1,19 @@
+patch-report v1
+result: PASS
+pdfium_branch: chromium/8100
+pdfium_head: f51279699cb59754d1f49aef10eb8e825fe56532
+embedpdf_commit: ed2f716e5381e34f096cc1e50e4259a55998d391
+embedpdf_upstream_base: 59ea54cce0179db3269c4c58874249597ca3b118
+patches: 7
+applied: 7
+conflicted: 0
+hunks_rejected: 0
+files_changed: 609
+--
+APPLIED  0001-public-headers.patch (27 files, apply dir .)
+APPLIED  0002-foundation.patch (67 files, apply dir .)
+APPLIED  0003-fpdfapi.patch (166 files, apply dir .)
+APPLIED  0004-fpdfdoc.patch (54 files, apply dir .)
+APPLIED  0005-fpdfsdk.patch (61 files, apply dir .)
+APPLIED  0006-tests.patch (231 files, apply dir .)
+APPLIED  0007-skia-geometry-only-stroke.patch (3 files, apply dir third_party/skia)
