@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage: scripts/pdfium-build.sh <slice> [--embedpdf]
-#   slice:      macos-arm64 (the iOS slices ios-arm64 and iossim-arm64 are added by plan task A4)
+#   slice:      macos-arm64 | ios-arm64 (iPad and iPhone hardware) | iossim-arm64 (iOS simulator on Apple silicon)
 #   --embedpdf: the tree has the EmbedPDF patch series applied (scripts/pdfium-patches-apply.sh)
 # Builds the complete static library with gn and ninja and copies it to dist/slices/<slice>/libpdfium.a
 # together with the args.gn that produced it and a BUILD-INFO.txt. A stock build refuses a patched tree and
@@ -12,7 +12,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 load_versions
 
-usage() { die 2 "usage: $SCRIPT_NAME <macos-arm64> [--embedpdf]"; }
+usage() { die 2 "usage: $SCRIPT_NAME <macos-arm64|ios-arm64|iossim-arm64> [--embedpdf]"; }
 [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
 SLICE="$1"
 MODE=stock
@@ -31,13 +31,21 @@ if [ -d "$WORK_DIR/depot_tools" ]; then
   export PATH="$WORK_DIR/depot_tools:$PATH"
 fi
 
+GN_ENV=""
 case "$SLICE" in
   macos-arm64)
     GN_OS=mac
     GN_CPU=arm64
     ;;
-  ios-arm64 | iossim-arm64)
-    die 2 "slice $SLICE is added by plan task A4 (iOS slices); only macos-arm64 is supported here"
+  ios-arm64)
+    GN_OS=ios
+    GN_CPU=arm64
+    GN_ENV=device
+    ;;
+  iossim-arm64)
+    GN_OS=ios
+    GN_CPU=arm64
+    GN_ENV=simulator
     ;;
   *) usage ;;
 esac
@@ -56,8 +64,16 @@ mkdir -p "$OUT"
   echo 'clang_use_chrome_plugins = false'
   echo 'is_component_build = false'
   echo 'is_debug = false'
-  echo "mac_deployment_target = \"$MACOS_MIN\""
-  echo "mac_min_system_version = \"$MACOS_MIN\""
+  if [ "$GN_OS" = mac ]; then
+    echo "mac_deployment_target = \"$MACOS_MIN\""
+    echo "mac_min_system_version = \"$MACOS_MIN\""
+  else
+    # The iOS settings pdfium-binaries uses (steps/05-configure.sh), with our deployment target.
+    echo "ios_deployment_target = \"$IOS_MIN\""
+    echo 'ios_enable_code_signing = false'
+    echo "target_environment = \"$GN_ENV\""
+    echo 'use_blink = true'
+  fi
   echo 'pdf_enable_v8 = false'
   echo 'pdf_enable_xfa = false'
   echo 'pdf_is_complete_lib = true'
@@ -114,7 +130,12 @@ fi
     echo "embedpdf_commit=${EMBEDPDF_COMMIT:-unknown}"
     echo "embedpdf_upstream_base=${EMBEDPDF_UPSTREAM_BASE:-unknown}"
   fi
-  echo "macos_min=$MACOS_MIN"
+  if [ "$GN_OS" = mac ]; then
+    echo "macos_min=$MACOS_MIN"
+  else
+    echo "ios_min=$IOS_MIN"
+    echo "target_environment=$GN_ENV"
+  fi
   echo "xcode=$( (xcodebuild -version 2>/dev/null || echo unknown) | head -1 | tr ' ' '_')"
 } >"$DEST/BUILD-INFO.txt"
 

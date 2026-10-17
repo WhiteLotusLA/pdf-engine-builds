@@ -105,9 +105,18 @@ tree no
 run -- FAKE_LIB=libpdfium.a
 check "no slice is a usage error (exit 2)" $([ "$code" -eq 2 ]; echo $?)
 run ios-arm64 -- FAKE_LIB=libpdfium.a
-check "ios-arm64 exits 2 and points at task A4" $([ "$code" -eq 2 ] && grep -q "task A4" <<<"$out"; echo $?)
+IOS_ARGS="$WORK/w/pdfium/out/ios-arm64/args.gn"
+check "ios-arm64 builds for the iOS device with the deployment target from IOS_MIN" \
+  $([ "$code" -eq 0 ] && grep -qx 'target_os = "ios"' "$IOS_ARGS" && grep -qx 'target_environment = "device"' "$IOS_ARGS" && grep -qx 'ios_deployment_target = "27.0"' "$IOS_ARGS" && grep -qx 'ios_enable_code_signing = false' "$IOS_ARGS"; echo $?)
+check "ios-arm64 has no macOS deployment arguments and is sorted" $([ -f "$IOS_ARGS" ] && ! grep -q 'mac_' "$IOS_ARGS" && [ "$(LC_ALL=C sort "$IOS_ARGS")" = "$(cat "$IOS_ARGS")" ]; echo $?)
+check "ios-arm64 installs dist/slices/ios-arm64/libpdfium.a and records ios_min" \
+  $([ -f "$WORK/w/dist/slices/ios-arm64/libpdfium.a" ] && grep -qx 'ios_min=27.0' "$WORK/w/dist/slices/ios-arm64/BUILD-INFO.txt" && grep -qx 'slice=ios-arm64' "$WORK/w/dist/slices/ios-arm64/BUILD-INFO.txt"; echo $?)
 run iossim-arm64 -- FAKE_LIB=libpdfium.a
-check "iossim-arm64 exits 2 and points at task A4" $([ "$code" -eq 2 ] && grep -q "task A4" <<<"$out"; echo $?)
+SIM_ARGS="$WORK/w/pdfium/out/iossim-arm64/args.gn"
+check "iossim-arm64 builds for the iOS simulator" $([ "$code" -eq 0 ] && grep -qx 'target_os = "ios"' "$SIM_ARGS" && grep -qx 'target_environment = "simulator"' "$SIM_ARGS" && grep -qx 'target_cpu = "arm64"' "$SIM_ARGS"; echo $?)
+check "iossim-arm64 installs dist/slices/iossim-arm64/libpdfium.a" $([ -f "$WORK/w/dist/slices/iossim-arm64/libpdfium.a" ] && grep -qx 'target_environment=simulator' "$WORK/w/dist/slices/iossim-arm64/BUILD-INFO.txt"; echo $?)
+run ios-arm64 --embedpdf -- FAKE_LIB=libpdfium.a
+check "a patched iOS build is refused on an unpatched tree (exit 3)" $([ "$code" -eq 3 ]; echo $?)
 run linux-x64 -- FAKE_LIB=libpdfium.a
 check "an unknown slice is a usage error" $([ "$code" -eq 2 ]; echo $?)
 run macos-arm64 --bogus -- FAKE_LIB=libpdfium.a
