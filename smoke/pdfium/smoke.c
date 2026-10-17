@@ -128,7 +128,7 @@ static int redaction_check(FPDF_DOCUMENT doc, const char *needle, const char *ke
 
   if (!skip_apply) {
     uint32_t removed = 0;
-    failures += check(EPDFPage_ApplyRedactions(page, &removed) != 0, "redaction: EPDFPage_ApplyRedactions");
+    failures += check(EPDFPage_ApplyRedactions(page, NULL, 0, &removed) != 0, "redaction: EPDFPage_ApplyRedactions");
   } else {
     printf("smoke: redaction: apply skipped on request\n");
   }
