@@ -32,8 +32,8 @@ rm -rf "$XCF" "$ZIP"
 
 # Headers the engine binding relies on. If upstream renames one, extend this list only after reading public/.
 STOCK_HEADERS="fpdfview.h fpdf_annot.h fpdf_attachment.h fpdf_catalog.h fpdf_dataavail.h fpdf_doc.h fpdf_edit.h fpdf_ext.h fpdf_flatten.h fpdf_formfill.h fpdf_fwlevent.h fpdf_javascript.h fpdf_ppo.h fpdf_progressive.h fpdf_save.h fpdf_searchex.h fpdf_signature.h fpdf_structtree.h fpdf_sysfontinfo.h fpdf_text.h fpdf_thumbnail.h fpdf_transformpage.h"
-EPDF_HEADERS="epdf_action.h epdf_checkpoint.h epdf_digest.h epdf_font.h epdf_form.h epdf_measure.h epdf_named_pages.h epdf_pieceinfo.h epdf_redact.h epdf_signature.h epdf_text.h"
-EPDF_EXTRA_FPDF_HEADERS="fpdf_jpeg.h fpdf_png.h"
+EPDF_HEADERS="epdf_action.h epdf_annot.h epdf_attachment.h epdf_capture.h epdf_catalog.h epdf_digest.h epdf_doc.h epdf_edit.h epdf_flatten.h epdf_font.h epdf_form.h epdf_layer.h epdf_measure.h epdf_named_pages.h epdf_pieceinfo.h epdf_png.h epdf_progressive.h epdf_redact.h epdf_save.h epdf_signature.h epdf_text.h epdf_view.h"
+EPDF_EXTRA_FPDF_HEADERS=""
 
 [ -d "$PUBLIC" ] || die 3 "no public/ directory at $PUBLIC (run scripts/pdfium-checkout.sh first)"
 

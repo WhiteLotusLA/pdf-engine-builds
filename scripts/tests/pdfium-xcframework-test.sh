@@ -18,7 +18,7 @@ check() { # <label> <status of the condition, 0 = true>
 }
 
 STOCK="fpdfview.h fpdf_annot.h fpdf_attachment.h fpdf_catalog.h fpdf_dataavail.h fpdf_doc.h fpdf_edit.h fpdf_ext.h fpdf_flatten.h fpdf_formfill.h fpdf_fwlevent.h fpdf_javascript.h fpdf_ppo.h fpdf_progressive.h fpdf_save.h fpdf_searchex.h fpdf_signature.h fpdf_structtree.h fpdf_sysfontinfo.h fpdf_text.h fpdf_thumbnail.h fpdf_transformpage.h"
-EPDF="epdf_action.h epdf_checkpoint.h epdf_digest.h epdf_font.h epdf_form.h epdf_measure.h epdf_named_pages.h epdf_pieceinfo.h epdf_redact.h epdf_signature.h epdf_text.h fpdf_jpeg.h fpdf_png.h"
+EPDF="epdf_action.h epdf_annot.h epdf_attachment.h epdf_capture.h epdf_catalog.h epdf_digest.h epdf_doc.h epdf_edit.h epdf_flatten.h epdf_font.h epdf_form.h epdf_layer.h epdf_measure.h epdf_named_pages.h epdf_pieceinfo.h epdf_png.h epdf_progressive.h epdf_redact.h epdf_save.h epdf_signature.h epdf_text.h epdf_view.h"
 
 # fake_header <path>: a tiny header with an include guard and one declaration
 fake_header() {
