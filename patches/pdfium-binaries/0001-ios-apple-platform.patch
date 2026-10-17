@@ -1,0 +1,33 @@
+# Provenance: adopted unchanged from bblanchon/pdfium-binaries (MIT License, Copyright 2014-2025 Benoit Blanchon).
+# Source: https://github.com/bblanchon/pdfium-binaries/blob/5b4d6b2ede1c1b0e17f5dc7b996c42d68d534ca8/patches/ios/pdfium.patch (the commit that built chromium/8100).
+# License: MIT, text in LICENSES.zip under pdfium-binaries/LICENSE.
+# Purpose: lets the Apple platform code in core/fxge build for iOS and removes a certificate setting that only Chromium's iOS test runner uses.
+diff --git a/core/fxge/BUILD.gn b/core/fxge/BUILD.gn
+index 5617425a1..5305ed83f 100644
+--- a/core/fxge/BUILD.gn
++++ b/core/fxge/BUILD.gn
+@@ -175,7 +175,7 @@ source_set("fxge") {
+     sources += [ "linux/fx_linux_impl.cpp" ]
+   }
+ 
+-  if (is_mac) {
++  if (is_mac || is_ios) {
+     sources += [
+       "apple/capple_platform.cpp",
+       "apple/capple_platform.h",
+diff --git a/testing/test.gni b/testing/test.gni
+index 6ad2c2d4a..21600090e 100644
+--- a/testing/test.gni
++++ b/testing/test.gni
+@@ -207,11 +207,6 @@ template("test") {
+       }
+ 
+       _bundle_id_suffix = target_name
+-      if (ios_automatically_manage_certs) {
+-        # Use the same bundle identifier for all unit tests when managing
+-        # certificates automatically as the number of free certs is limited.
+-        _bundle_id_suffix = "generic-unit-test"
+-      }
+       if (!defined(extra_substitutions)) {
+         extra_substitutions = []
+       }
