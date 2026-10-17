@@ -64,9 +64,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.perfectbalance.enginebuilds.pdfiumsmoke.tests
         TARGETED_DEVICE_FAMILY: "2"
         GENERATE_INFOPLIST_FILE: "YES"
-        # @testable import PDFiumSmoke loads the app's internal PDFium import, so the module map must be
-        # visible here. Tests run only on the simulator; the headers are the same in every slice.
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/../../../dist/PDFium.xcframework/ios-arm64-simulator/Headers
+        # No SWIFT_INCLUDE_PATHS for the PDFium headers: Xcode already copies the linked XCFramework's Headers
+        # into $(BUILT_PRODUCTS_DIR)/include, which this target sees, and a second path to the same module
+        # map fails with "Redefinition of module 'PDFium'" (CI run 39079474867).
     dependencies:
       - target: PDFiumSmoke
 
