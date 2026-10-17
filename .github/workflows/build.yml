@@ -50,6 +50,8 @@ jobs:
           fi
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
+      - name: Install xcodegen (the iPad smoke app test needs it)
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
       - name: Run every self-test
         run: |
           for t in scripts/tests/*-test.sh; do
@@ -186,3 +188,100 @@ jobs:
           path: dist/test-results/
           if-no-files-found: warn
           retention-days: 90
+
+  pdfium-embedpdf-ios:
+    name: PDFium with EmbedPDF patches, ${{ matrix.slice }}
+    if: github.event_name != 'pull_request' && format('{0}', inputs.include_patched) != 'false'
+    needs: self-tests
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        slice: [ios-arm64, iossim-arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load the pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          df -h / | tail -1
+      - name: Check out PDFium (macOS and iOS dependencies) at the pinned branch
+        env:
+          PDFIUM_TARGET_OS_LIST: mac ios
+        run: scripts/pdfium-checkout.sh
+      - name: Apply the pdfium-binaries and EmbedPDF patches (all or nothing)
+        run: scripts/pdfium-patches-apply.sh
+      - name: Build libpdfium.a for ${{ matrix.slice }}
+        run: scripts/pdfium-build.sh ${{ matrix.slice }} --embedpdf
+      - name: Verify the library and its platform
+        run: |
+          set -euo pipefail
+          scripts/pdfium-verify-lib.sh dist/slices/${{ matrix.slice }}/libpdfium.a --embedpdf
+          platform="$(scripts/lib-platform.sh dist/slices/${{ matrix.slice }}/libpdfium.a)"
+          echo "built for: $platform"
+          case "${{ matrix.slice }}" in
+            ios-arm64) want="IOS $IOS_MIN" ;;
+            iossim-arm64) want="IOSSIMULATOR $IOS_MIN" ;;
+          esac
+          [ "$platform" = "$want" ] || { echo "::error::wanted $want"; exit 1; }
+      - name: Upload the slice
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pdfium-slice-${{ matrix.slice }}
+          path: dist/slices/${{ matrix.slice }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  pdfium-xcframework:
+    name: PDFium.xcframework with three slices, iPad smoke app
+    if: github.event_name != 'pull_request' && format('{0}', inputs.include_patched) != 'false'
+    needs: [pdfium-embedpdf, pdfium-embedpdf-ios]
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load the pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+      - name: Install xcodegen
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Download the macOS slice
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pdfium-embedpdf-macos-arm64
+          path: work/macos
+      - name: Download the iOS device slice
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pdfium-slice-ios-arm64
+          path: dist/slices/ios-arm64
+      - name: Download the iOS simulator slice
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pdfium-slice-iossim-arm64
+          path: dist/slices/iossim-arm64
+      - name: Merge the three slices into PDFium.xcframework
+        run: scripts/pdfium-xcframework-merge.sh work/macos/PDFium.xcframework.zip
+      - name: iPad smoke app on the simulator (iossim-arm64 slice)
+        run: smoke/pdfium/ios-app/run.sh simulator
+      - name: iPad smoke app for a device (ios-arm64 slice)
+        run: smoke/pdfium/ios-app/run.sh device
+      - name: Upload the three-slice XCFramework
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pdfium-xcframework
+          path: dist/PDFium.xcframework.zip
+          if-no-files-found: error
+          retention-days: 30
