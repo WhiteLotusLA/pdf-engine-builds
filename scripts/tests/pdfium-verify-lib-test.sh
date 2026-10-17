@@ -17,7 +17,7 @@ check() { # <label> <status of the condition, 0 = true>
 }
 
 STOCK_SYMS="FPDF_InitLibraryWithConfig FPDF_DestroyLibrary FPDF_LoadDocument FPDF_LoadMemDocument FPDF_GetPageCount FPDF_LoadPage FPDF_ClosePage FPDF_GetLastError FPDFText_LoadPage FPDFText_GetText FPDF_SaveAsCopy FPDF_SaveWithVersion FPDFBookmark_GetFirstChild FPDFPage_CreateAnnot FPDF_ImportPagesByIndex"
-EPDF_SYMS="EPDFPage_ApplyRedactions EPDFAnnot_ApplyRedaction EPDF_DigestBuffer"
+EPDF_SYMS="EPDFPage_ApplyRedactions EPDFText_RedactInRect EPDF_DigestBuffer"
 
 # make_lib <out.a> <arch> <symbol...>: a static archive whose object defines each symbol as a function
 make_lib() {

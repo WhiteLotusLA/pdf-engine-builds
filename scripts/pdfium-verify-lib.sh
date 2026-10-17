@@ -55,7 +55,7 @@ nm "$LIB" 2>/dev/null >"$SYMS" || true
 
 REQUIRED="FPDF_InitLibraryWithConfig FPDF_DestroyLibrary FPDF_LoadDocument FPDF_LoadMemDocument FPDF_GetPageCount FPDF_LoadPage FPDF_ClosePage FPDF_GetLastError FPDFText_LoadPage FPDFText_GetText FPDF_SaveAsCopy FPDF_SaveWithVersion FPDFBookmark_GetFirstChild FPDFPage_CreateAnnot FPDF_ImportPagesByIndex"
 if [ "$MODE" = embedpdf ]; then
-  REQUIRED="$REQUIRED EPDFPage_ApplyRedactions EPDFAnnot_ApplyRedaction EPDF_DigestBuffer"
+  REQUIRED="$REQUIRED EPDFPage_ApplyRedactions EPDFText_RedactInRect EPDF_DigestBuffer"
 fi
 for name in $REQUIRED; do
   if ! grep -qE " [Tt] _${name}\$" "$SYMS"; then
