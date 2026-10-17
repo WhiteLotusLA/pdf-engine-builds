@@ -58,3 +58,14 @@ The XCFramework has one library identifier, `macos-arm64`, holding `libpdfium.a`
 ## Releasing
 
 Push a tag of the form `v<major>.<minor>.<patch>-pdfium<NNNN>[-stock][-macos-only]` whose PDFium number matches `PDFIUM_BRANCH` in `versions.env`. `release.yml` builds, packs, writes `checksums.txt`, creates the release and then downloads the published assets again to verify them. Until plan task A6 is done, only `-stock-macos-only` tags are accepted.
+
+## The EmbedPDF patch series
+
+`patches/embedpdf/` holds seven patch files derived from https://github.com/embedpdf/runtime (Apache-2.0 additions by CloudPDF LTD on top of PDFium, BSD): the `epdf_*` extension API (redaction, form fields, signatures, digests, checkpoints, fonts, measurements and more) and the core changes it needs. The series is the difference between `EMBEDPDF_UPSTREAM_BASE` (the upstream PDFium commit the fork last merged) and `EMBEDPDF_COMMIT`, split by area, with a provenance header on every file. `SOURCE.txt` records the pins and a checksum per patch; `EXCLUDED.txt` lists the fork files that are deliberately not carried (its CI files, build patches, scripts, NOTICE).
+
+- `scripts/pdfium-patches-export.sh` regenerates the series from the pins; `--check` fails when the committed series differs from what the pins produce (CI runs it).
+- `scripts/pdfium-patches-control.sh` proves the export is correct: the series must apply to its own base without a conflict and reproduce the fork's tree.
+- `scripts/pdfium-patches-apply.sh` applies `patches/pdfium-binaries/` and then `patches/embedpdf/` to a PDFium checkout, all or nothing, and writes `dist/patch-report.txt`. A conflict means upstream PDFium changed code the fork also changed; the report names the files and hunks. Nothing is applied in that case and the build fails.
+- `scripts/pdfium-tests.sh` builds and runs the fork's own tests (redaction, forms, signatures are the gate).
+
+To move the pins: change `PDFIUM_BRANCH`, `EMBEDPDF_COMMIT` and `EMBEDPDF_UPSTREAM_BASE` in `versions.env` together. The base is the upstream PDFium parent of the fork's newest upstream sync merge into the commit, a merge whose message reads either "Update PDFium" or "Merge commit '<sha>' into embedpdf/sync/<sha>"; the export script's guards check it (no `public/epdf_redact.h`, an ancestor of `EMBEDPDF_COMMIT`) and the control experiment proves it. Then run the export and the control, commit the new series, and read the patch report of the next CI run. `docs/patch-reports/` keeps the reports of past runs (file names and counts only).
