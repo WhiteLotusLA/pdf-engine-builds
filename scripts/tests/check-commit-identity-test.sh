@@ -67,6 +67,9 @@ commit_as "$WORK/range" "$NOREPLY" "$NOREPLY" new
 run "$WORK/range" "$base..HEAD"
 check "a revision range checks only the new commits" $([ "$code" -eq 0 ] && grep -q "1 commit(s) ok" <<<"$out"; echo $?)
 
+run "$WORK/good" does-not-exist..HEAD
+check "a bad revision range exits 2 and never reports success" $([ "$code" -eq 2 ] && ! grep -q "commit(s) ok" <<<"$out"; echo $?)
+
 # Local config check (only outside CI)
 git -C "$WORK/good" config user.email "$PERSONAL"
 set +e

@@ -66,8 +66,16 @@ for f in ${files[@]+"${files[@]}"}; do
     fi
   done < <(awk '
     /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(/:$/, "", job) }
-    /^[[:space:]]+[a-z-]+:[[:space:]]*write(-all)?[[:space:]]*(#.*)?$/ { line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line); sub(/[ \t]*#.*$/, "", line); print job "|" line }
-    /^permissions:[[:space:]]*write-all/ { print "-|write-all" }
+    {
+      q = $0
+      gsub(/["\047]/, "", q)
+      sub(/[ \t]*#.*$/, "", q)
+      gsub(/^[ \t]+|[ \t]+$/, "", q)
+    }
+    # inline (flow or scalar) permissions that mention write: never allowed
+    q ~ /^permissions:[ \t]*[^ \t]/ && q ~ /write/ { print job "|" q; next }
+    # block style: "<scope>: write"
+    q ~ /^[a-z-]+:[ \t]*write(-all)?$/ { print job "|" q }
   ' "$f")
 
   # 4. runners
@@ -83,7 +91,7 @@ for f in ${files[@]+"${files[@]}"}; do
   fi
 
   # 6. dangerous trigger
-  if grep -E '^[[:space:]]*pull_request_target' "$f" >/dev/null; then
+  if sed 's/#.*$//' "$f" | grep -E 'pull_request_target' >/dev/null; then
     fail "$name: pull_request_target is not allowed"
   fi
 done

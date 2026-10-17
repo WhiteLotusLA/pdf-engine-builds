@@ -120,6 +120,27 @@ fresh "$WORK/d12"
 awk '/^on:/ { print "on:"; print "  pull_request_target:"; next } { print }' "$WORK/d12/lint.yml" >"$WORK/d12/lint.new" && mv "$WORK/d12/lint.new" "$WORK/d12/lint.yml"
 expect_fail "pull_request_target is rejected" "$WORK/d12" "pull_request_target"
 
+fresh "$WORK/d14"
+awk '{ print } /^    runs-on:/ { print "    permissions: { contents: write, id-token: write }" }' "$WORK/d14/lint.yml" >"$WORK/d14/lint.new" && mv "$WORK/d14/lint.new" "$WORK/d14/lint.yml"
+expect_fail "write scopes in flow style are rejected" "$WORK/d14" "write scope not allowed anywhere"
+
+fresh "$WORK/d15"
+awk '{ print } /^    runs-on:/ { print "    permissions:"; print "      contents: \"write\"" }' "$WORK/d15/lint.yml" >"$WORK/d15/lint.new" && mv "$WORK/d15/lint.new" "$WORK/d15/lint.yml"
+expect_fail "a quoted write scope in a job other than release is rejected" "$WORK/d15" "only allowed in the release job of release.yml (found in job 'lint')"
+
+fresh "$WORK/d16"
+sed -i.bak 's/^on: \[push\]/on: [push, pull_request_target]/' "$WORK/d16/lint.yml"
+expect_fail "pull_request_target in a flow list is rejected" "$WORK/d16" "pull_request_target"
+
+fresh "$WORK/d17"
+sed -i.bak 's/^on: \[push\]/on: pull_request_target/' "$WORK/d17/lint.yml"
+expect_fail "pull_request_target as a plain scalar is rejected" "$WORK/d17" "pull_request_target"
+
+fresh "$WORK/d18"
+sed -i.bak 's/^on: \[push\]/on: [push] # never pull_request_target/' "$WORK/d18/lint.yml"
+run "$WORK/d18"
+check "a comment that mentions pull_request_target is fine" $([ "$code" -eq 0 ]; echo $?)
+
 fresh "$WORK/d13"
 sed -i.bak "s|- uses: actions/checkout@$SHA # v7.0.1|- uses: ./.github/actions/local-thing|" "$WORK/d13/lint.yml"
 sed -i.bak '/persist-credentials: false/d; /^        with:$/d' "$WORK/d13/lint.yml"

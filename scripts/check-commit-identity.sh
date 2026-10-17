@@ -5,7 +5,7 @@
 #   committer e-mail: the noreply address, or GitHub's own web-flow address (squash merges made on github.com)
 # On a developer machine (CI unset) it also checks the repo-local git config.
 # Offending e-mail addresses are never printed (CI logs of a public repo are public); only commit ids are.
-# Exit codes: 0 ok, 1 a commit or the local config has the wrong identity, 2 not a git repository.
+# Exit codes: 0 ok, 1 a commit or the local config has the wrong identity, 2 not a git repository or a bad range.
 set -euo pipefail
 
 NOREPLY="43762553+WhiteLotusLA@users.noreply.github.com"
@@ -14,6 +14,11 @@ range="${1:-HEAD}"
 
 git rev-parse --git-dir >/dev/null 2>&1 || {
   echo "check-commit-identity: not a git repository" >&2
+  exit 2
+}
+
+log="$(git log --format='%H|%ae|%ce' "$range")" || {
+  echo "check-commit-identity: cannot read the revision range: $range" >&2
   exit 2
 }
 
@@ -30,7 +35,7 @@ while IFS='|' read -r sha author_email committer_email; do
     echo "FAIL: commit ${sha:0:12} has a committer e-mail that is not the noreply address"
     bad=$((bad + 1))
   fi
-done < <(git log --format='%H|%ae|%ce' "$range")
+done <<<"$log"
 
 if [ -z "${CI:-}" ]; then
   if [ "$(git config --local user.email || true)" != "$NOREPLY" ]; then
