@@ -42,7 +42,7 @@ case "$MODE" in
     xcodebuild test -project PDFiumSmoke.xcodeproj -scheme PDFiumSmoke \
       -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath "$DERIVED" \
       -resultBundlePath "$RESULT" \
-      CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$LOG" | grep -E 'Test run with|Test Case|error:|\*\* TEST' || true
+      CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$LOG" | grep -E 'Test run with|Test Case|error:|note: |\*\* TEST' || true
     grep -q '\*\* TEST SUCCEEDED \*\*' "$LOG" || die 1 "xcodebuild test did not succeed (see $LOG)"
     # Count from the result bundle, not from console wording: exactly 5 passed, none failed or skipped.
     summary="$(xcrun xcresulttool get test-results summary --path "$RESULT" --compact)" || die 1 "cannot read $RESULT"
