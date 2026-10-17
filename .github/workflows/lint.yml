@@ -50,6 +50,9 @@ jobs:
       - name: Workflow policy (pinned actions, read-only permissions, standard runners)
         run: scripts/check-workflows.sh
 
+      - name: Patch provenance headers
+        run: scripts/check-patch-headers.sh
+
       - name: Commit identity (public repo, noreply address only)
         if: github.event_name == 'push'
         run: scripts/check-commit-identity.sh
