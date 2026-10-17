@@ -15,6 +15,9 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 load_versions
 
+# Patch files carry binary and non-UTF-8 bytes: BSD sed and grep abort on them in a UTF-8 locale.
+export LC_ALL=C
+
 CHECK=0
 case "${1:-}" in
   '') ;;

@@ -17,6 +17,9 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 load_versions
 
+# Patch files carry binary and non-UTF-8 bytes: BSD sed and grep abort on them in a UTF-8 locale.
+export LC_ALL=C
+
 [ "$#" -eq 0 ] || die 2 "usage: $SCRIPT_NAME"
 require_cmd git
 PDFIUM_DIR="${PDFIUM_DIR:-$WORK_DIR/pdfium}"

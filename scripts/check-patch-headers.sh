@@ -6,6 +6,8 @@
 # and, when it has one, a safe "# Apply-Dir: <relative dir>" (letters, digits, _ . / - ; no "..").
 # Exit codes: 0 ok, 1 a patch has a missing or bad header, 2 usage error.
 set -euo pipefail
+# Patch files carry binary and non-UTF-8 bytes: BSD sed and grep abort on them in a UTF-8 locale.
+export LC_ALL=C
 
 ROOT="${1:-patches}"
 if [ ! -d "$ROOT" ]; then

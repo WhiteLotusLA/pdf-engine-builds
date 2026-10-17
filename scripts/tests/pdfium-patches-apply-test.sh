@@ -88,6 +88,18 @@ check "the report says PASS with 3 patches applied and none conflicted" \
 check "the report carries the pins" $(grep -qx 'pdfium_branch: chromium/8086' "$REPORT" && grep -q '^embedpdf_commit: 1111' "$REPORT" && grep -q '^pdfium_head: abc123' "$REPORT"; echo $?)
 check "the report lists each applied patch" $(grep -q '^APPLIED  0001-a.patch' "$REPORT" && grep -q '^APPLIED  0003-skia.patch (1 files, apply dir third_party/skia)' "$REPORT"; echo $?)
 
+# --- a patch that carries non-UTF-8 bytes, read under a UTF-8 locale (BSD sed aborts on them unless LC_ALL=C) ----
+mk_checkout
+mk_patches
+printf 'caf\351 \377\376 latin-1 bytes\n' >"$PD/latin1.txt"
+g -C "$PD" add -N latin1.txt
+{ header .; g -C "$PD" diff --full-index; } >"$PATCHES/embedpdf/0004-latin1.patch"
+g -C "$PD" reset -q -- latin1.txt
+rm -f "$PD/latin1.txt"
+run LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+check "a patch with non-UTF-8 bytes applies under a UTF-8 locale" \
+  $([ "$code" -eq 0 ] && grep -qx 'applied: 4' "$REPORT" && printf 'caf\351 \377\376 latin-1 bytes\n' | cmp -s - "$PD/latin1.txt"; echo $?)
+
 # --- a conflict in the middle of the series ------------------------------------------------------------------
 mk_checkout
 mk_patches
