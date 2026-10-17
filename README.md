@@ -44,3 +44,17 @@ Tests that need macOS tools (`xcodebuild`, `lipo`, `libtool`) skip themselves on
 ## License
 
 Scripts and patch files authored here: Apache-2.0 (see `LICENSE`). Third-party code keeps its own license; see `NOTICE`.
+
+## Runner and Xcode
+
+Builds run on the standard arm64 macOS runner label `xcode-27`: macOS 27 with Xcode 27.0 (build 27A266a, the same Xcode as the author's Mac), selected in the workflows with `/Applications/Xcode_27.0.app`. As of October 2026 `xcode-27` is a public preview label. The workflows read the runner label from the repository variable `MACOS_RUNNER` and fall back to `xcode-27`. If the label disappears, set `MACOS_RUNNER` to `macos-26` and change `XCODE_APP` in the workflows to the newest Xcode that image lists; the deployment target stays 27.0 and PDFium needs no macOS 27 symbols, but record what you changed. Never use a `-large` or `-xlarge` label (they are paid); `scripts/check-workflows.sh` rejects them.
+
+All compilation happens in CI. Do not run `scripts/pdfium-checkout.sh` or `scripts/pdfium-build.sh` on a personal Mac: the checkout is several GB and the build takes 30 minutes or more.
+
+## Using the macOS slice
+
+The XCFramework has one library identifier, `macos-arm64`, holding `libpdfium.a` (a complete static archive: PDFium plus its bundled third-party code), `Headers/module.modulemap` and `Headers/PDFium/` (every `fpdf*.h` and a generated `PDFium.h` umbrella header). Swift imports the module with `-I <slice>/Headers` and `import PDFium`; C and C++ code uses the same search path and `#include "PDFium/PDFium.h"`. A consumer links `-lc++` and the frameworks AppKit, CoreFoundation, CoreGraphics, CoreText and Foundation. `smoke/pdfium/run-smoke.sh <PDFium.xcframework>` shows the exact link line.
+
+## Releasing
+
+Push a tag of the form `v<major>.<minor>.<patch>-pdfium<NNNN>[-stock][-macos-only]` whose PDFium number matches `PDFIUM_BRANCH` in `versions.env`. `release.yml` builds, packs, writes `checksums.txt`, creates the release and then downloads the published assets again to verify them. Until plan task A6 is done, only `-stock-macos-only` tags are accepted.
