@@ -47,15 +47,23 @@ make_mac_zip() { # <zip path> <with module map: yes|no>
   rm -f "$1"
   ditto -c -k --keepParent "$d/PDFium.xcframework" "$1"
 }
-put_slice() { # <dist> <slice dir name> <tiny kind>
+# Stand-in BUILD-INFO.txt as scripts/pdfium-build.sh writes it; the merge compares three keys across slices.
+write_info() { # <file> <slice> [head] [mode] [branch]
+  mkdir -p "$(dirname "$1")"
+  printf 'slice=%s\nmode=%s\npdfium_branch=%s\npdfium_head=%s\n' "$2" "${4:-embedpdf}" "${5:-chromium/8100}" "${3:-aaaa}" >"$1"
+}
+put_slice() { # <dist> <slice dir name> <tiny kind> [head] [mode]
   mkdir -p "$1/slices/$2"
   cp "$(tiny_lib "$3")" "$1/slices/$2/libpdfium.a"
+  write_info "$1/slices/$2/BUILD-INFO.txt" "$2" "${4:-aaaa}" "${5:-embedpdf}"
 }
 run() { # <dist> <zip>
   DIST_DIR="$1" expect_exit "$3" "$4" "$MERGE" "$2"
 }
 
 make_mac_zip "$WORK/mac.zip" yes
+# The macOS job's artifact unpacks to <dir>/PDFium.xcframework.zip and <dir>/slices/macos-arm64/BUILD-INFO.txt.
+write_info "$WORK/slices/macos-arm64/BUILD-INFO.txt" macos-arm64
 D="$WORK/good"
 put_slice "$D" ios-arm64 ios
 put_slice "$D" iossim-arm64 sim
@@ -95,6 +103,33 @@ check "the failure shows the platform it found" $(grep -q "built for" <<<"$out";
 put_slice "$WORK/twosims" ios-arm64 sim
 put_slice "$WORK/twosims" iossim-arm64 sim
 fail_case twosims 4 "two simulator libraries for the device and the simulator slot (exit 4)"
+
+# Slices from different checkouts or modes must not be merged.
+put_slice "$WORK/mixhead" ios-arm64 ios bbbb
+put_slice "$WORK/mixhead" iossim-arm64 sim
+fail_case mixhead 3 "an iOS slice built from a different PDFium commit (exit 3)"
+check "the failure names the key" $(grep -q "pdfium_head" <<<"$out"; echo $?)
+
+put_slice "$WORK/mixmode" ios-arm64 ios aaaa stock
+put_slice "$WORK/mixmode" iossim-arm64 sim
+fail_case mixmode 3 "an iOS slice built without the patches (exit 3)"
+check "the failure names the mode" $(grep -q "mode" <<<"$out"; echo $?)
+
+put_slice "$WORK/noinfo" ios-arm64 ios
+put_slice "$WORK/noinfo" iossim-arm64 sim
+rm "$WORK/noinfo/slices/iossim-arm64/BUILD-INFO.txt"
+fail_case noinfo 3 "a slice without BUILD-INFO.txt (exit 3)"
+check "the failure names the file" $(grep -q "BUILD-INFO.txt" <<<"$out"; echo $?)
+
+mkdir -p "$WORK/macnoinfo"
+cp "$WORK/mac.zip" "$WORK/macnoinfo/mac.zip"
+put_slice "$WORK/nomacinfo" ios-arm64 ios
+put_slice "$WORK/nomacinfo" iossim-arm64 sim
+ZIP_FOR_CASE="$WORK/macnoinfo/mac.zip" fail_case nomacinfo 3 "a macOS zip without its BUILD-INFO.txt beside it (exit 3)"
+
+printf 'not a zip\n' >"$WORK/corrupt.zip"
+expect_exit "a corrupt zip is an input error" 3 "$MERGE" "$WORK/corrupt.zip"
+check "the failure says it cannot unzip" $(grep -q "cannot unzip" <<<"$out"; echo $?)
 
 expect_exit "no argument is a usage error" 2 "$MERGE"
 expect_exit "a missing zip is an input error" 3 "$MERGE" "$WORK/nowhere.zip"

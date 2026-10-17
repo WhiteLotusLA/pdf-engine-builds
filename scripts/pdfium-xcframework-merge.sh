@@ -10,6 +10,7 @@
 #   - the iOS device and simulator libraries come from dist/slices/ios-arm64/libpdfium.a and
 #     dist/slices/iossim-arm64/libpdfium.a, as scripts/pdfium-build.sh leaves them.
 # The same Headers folder goes into every slice (the public headers do not depend on the platform).
+# The three slices' BUILD-INFO.txt files must agree on pdfium_head, pdfium_branch and mode=embedpdf.
 # The result must pass scripts/verify-xcframework.sh with exactly macos-arm64, ios-arm64 and
 # ios-arm64-simulator; otherwise nothing is left behind.
 #
@@ -27,7 +28,7 @@ require_cmd xcodebuild ditto
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/pdfium-merge.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-ditto -x -k "$MAC_ZIP" "$TMP"
+ditto -x -k "$MAC_ZIP" "$TMP" || die 3 "cannot unzip $(basename "$MAC_ZIP") (not a valid zip file)"
 MAC_XCF="$TMP/PDFium.xcframework"
 MAC_LIB="$MAC_XCF/macos-arm64/libpdfium.a"
 HEADERS="$MAC_XCF/macos-arm64/Headers"
@@ -40,6 +41,24 @@ IOS_LIB="$DIST_DIR/slices/ios-arm64/libpdfium.a"
 SIM_LIB="$DIST_DIR/slices/iossim-arm64/libpdfium.a"
 [ -f "$IOS_LIB" ] || die 3 "missing slice ios-arm64: $IOS_LIB"
 [ -f "$SIM_LIB" ] || die 3 "missing slice iossim-arm64: $SIM_LIB"
+
+# All three slices must come from the same PDFium checkout and the same mode: three CI jobs check the
+# branch out separately, so a backport landing between them would otherwise give mixed-commit slices.
+# The macOS BUILD-INFO.txt sits beside the zip as the macOS job uploaded it (slices/macos-arm64/).
+MAC_INFO="$(dirname "$MAC_ZIP")/slices/macos-arm64/BUILD-INFO.txt"
+[ -f "$MAC_INFO" ] || die 3 "missing BUILD-INFO.txt for macos-arm64 (expected slices/macos-arm64/BUILD-INFO.txt beside $(basename "$MAC_ZIP"))"
+for id in ios-arm64 iossim-arm64; do
+  [ -f "$DIST_DIR/slices/$id/BUILD-INFO.txt" ] || die 3 "missing BUILD-INFO.txt for slice $id"
+done
+for key in pdfium_head pdfium_branch mode; do
+  want="$(sed -n "s/^$key=//p" "$MAC_INFO" | head -1)"
+  [ -n "$want" ] || die 3 "macos-arm64 BUILD-INFO.txt has no $key line"
+  for id in ios-arm64 iossim-arm64; do
+    got="$(sed -n "s/^$key=//p" "$DIST_DIR/slices/$id/BUILD-INFO.txt" | head -1)"
+    [ "$got" = "$want" ] || die 3 "slices differ in $key: macos-arm64 has '$want', $id has '${got:-nothing}'"
+  done
+done
+[ "$(sed -n 's/^mode=//p' "$MAC_INFO" | head -1)" = embedpdf ] || die 3 "the slices were not built with the EmbedPDF patches (mode is not embedpdf)"
 
 # The result is built beside the final name and moved into place only after it verifies.
 STAGE="$TMP/out"
