@@ -9,7 +9,7 @@ The app repository is private. This repository is public so that the standard Gi
 
 ## What a release contains
 
-A release tag looks like `v<major>.<minor>.<patch>-pdfium<N>`, for example `v0.1.0-pdfium8086`. A `-stock` suffix means no EmbedPDF patches; a `-macos-only` suffix means only the macOS slice. Both mark a pre-release.
+A release tag looks like `v<major>.<minor>.<patch>-pdfium<NNNN>`, for example `v0.1.0-pdfium8100`; the four-digit number must equal the `PDFIUM_BRANCH` pin in `versions.env`. A `-stock` suffix means no EmbedPDF patches; a `-macos-only` suffix means only the macOS slice; either one marks a pre-release. `scripts/release-tag.sh` parses all four shapes (plain, `-stock`, `-macos-only`, `-stock-macos-only`), but `release.yml` builds only two of them: the plain tag (the full release) and `-stock-macos-only`. It refuses `-stock` alone and `-macos-only` alone.
 
 | Asset | Contents |
 |---|---|
@@ -57,7 +57,7 @@ The XCFramework has one library identifier, `macos-arm64`, holding `libpdfium.a`
 
 ## Releasing
 
-Push a tag of the form `v<major>.<minor>.<patch>-pdfium<NNNN>[-stock][-macos-only]` whose PDFium number matches `PDFIUM_BRANCH` in `versions.env`. `release.yml` builds, packs, writes `checksums.txt`, creates the release and then downloads the published assets again to verify them. Until plan task A6 is done, only `-stock-macos-only` tags are accepted.
+Push a tag. The tag shapes, the all-or-nothing gate, the dry run and what to do after a failed run are described under [Releases](#releases) below.
 
 ## The EmbedPDF patch series
 
@@ -110,11 +110,45 @@ slice of both XCFrameworks and the notices before it creates a draft release, co
 of each uploaded file with the local one, and only then publishes. One bad slice, one wrong checksum, and
 nothing is published. To rehearse: Actions tab, `release`, "Run workflow", enter a tag, leave "dry run" ticked.
 
+A real release (dry run off) only runs from the tag itself: push the tag, or use "Run workflow" with the tag
+selected under "Use workflow from" (not `main`). A real run started from any other ref fails in the first job,
+so a build of `main` can never be published under an older tag. To retry a failed tag run, use "Re-run failed
+jobs" on that run.
+
+The gate refuses to start when a release or a draft release already exists for the tag, and touches nothing when
+it refuses. A published release is never replaced or deleted by the workflow. A run that fails after it created
+its draft deletes that draft. If a draft is left behind anyway (publishing it failed, or deleting it did), look
+at it on the Releases page, delete it by hand, and only then re-run.
+
 ## Refreshing PDFium
 
 The build repo moves to a newer PDFium release at least every 90 days, and sooner when a Chrome stable
-release note lists a PDFium security fix. `refresh-check.yml` runs every Monday; when a refresh is due the run
-fails, the reason is in the job summary and GitHub emails the repository owner. To refresh: edit `PDFIUM_BRANCH`
-(and, if needed, `EMBEDPDF_COMMIT`, `EMBEDPDF_UPSTREAM_BASE`, `DEPOT_TOOLS_COMMIT`) in `versions.env`, re-derive
-the patch series (`scripts/pdfium-patches-export.sh`), read `dist/patch-report.txt` from the CI run, tag a
-release. The app repo then moves its `Engines.lock` to the new tag.
+release note lists a PDFium security fix. `refresh-check.yml` runs `scripts/refresh-check.sh` every Monday. The
+run fails, the reason is in the job summary and GitHub emails the repository owner, when a newer `chromium/NNNN`
+branch exists and the pin is 90 or more days old, or when a Chrome stable release note dated after the pin
+lists a security fix in PDF or PDFium. The check reads the Chrome Releases feed page by page back to the day the
+pin was adopted, and it fails instead of reporting "no refresh due" when it cannot read the feed, its dates or
+the git history (it needs a full clone, `fetch-depth: 0`). A security reason clears only when the pin moves to
+a newer branch; rebuilding the same branch does not clear it.
+
+To refresh:
+
+1. Edit `PDFIUM_BRANCH` (and, if needed, `EMBEDPDF_COMMIT`, `EMBEDPDF_UPSTREAM_BASE`, `DEPOT_TOOLS_COMMIT`) in
+   `versions.env`.
+2. When `EMBEDPDF_COMMIT` moved, copy `LICENSE` and `NOTICE` from the root of the EmbedPDF repository at the new
+   commit to `legal/embedpdf/LICENSE` and `legal/embedpdf/NOTICE`, and write the new commit id to
+   `legal/embedpdf/COMMIT`. `scripts/licenses.sh` refuses to assemble `LICENSES.zip` while `COMMIT` names another
+   commit than `EMBEDPDF_COMMIT`, so the release would fail at that step.
+3. Re-derive the patch series (`scripts/pdfium-patches-export.sh`), read `dist/patch-report.txt` from the CI
+   run, and tag a release.
+
+The app repo then moves its `Engines.lock` to the new tag.
+
+GitHub switches off scheduled workflows in a public repository after 60 days without repository activity, and
+this repository is quiet between refreshes, so the weekly run can stop before the 90-day rule can fire. The run
+does not fail when that happens, it just stops, and GitHub's documentation promises no notice. To see it, run `gh workflow list --all` (a plain
+`gh workflow list` hides disabled workflows); the `refresh-check` row shows the state `active`, or
+`disabled_inactivity` once GitHub has switched it off. To turn it back on, run
+`gh workflow enable refresh-check.yml`, then start one run by hand ("Run workflow" on the `refresh-check`
+workflow) to see the result. There is deliberately no keepalive job in this repository: it would need a write
+permission, which `scripts/check-workflows.sh` does not allow outside the release job.

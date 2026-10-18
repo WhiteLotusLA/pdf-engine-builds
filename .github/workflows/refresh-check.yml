@@ -3,7 +3,17 @@ name: refresh-check
 # Weekly check that the PDFium pin does not go stale. It fails (and GitHub emails the repository
 # owner about the failed scheduled run) when a newer chromium branch exists and the pin is 90 days
 # old or older, or when a Chrome release note after the pin date lists a security fix in PDFium or
-# in PDF. The reason is in the job summary. See scripts/refresh-check.sh.
+# in PDF. The reason is in the job summary. It fails too when it cannot read the feed, its dates or the
+# git history, because a check that could not run must not look like a pass. See scripts/refresh-check.sh.
+#
+# GitHub switches off scheduled workflows in a public repository after 60 days without repository
+# activity, and this repository is quiet between refreshes, so the schedule can stop before the 90-day
+# rule can fire. The run does not fail when that happens, it just stops, and GitHub's documentation
+# promises no notice. To see it, run `gh workflow list --all` (a plain `gh workflow list` hides disabled
+# workflows): this workflow shows the state `active`, or `disabled_inactivity` once GitHub has switched
+# it off. To turn it back on, run `gh workflow enable refresh-check.yml`. There is deliberately no
+# keepalive step: it would need a write permission, which scripts/check-workflows.sh does not allow
+# here. Watching the state is left to a read-only check outside this workflow.
 
 on:
   schedule:
