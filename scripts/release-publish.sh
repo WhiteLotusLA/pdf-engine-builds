@@ -20,17 +20,29 @@
 #   5. LICENSES.zip holds, each non-empty, a README.txt and every notice licenses.sh adds for a full release:
 #      PDFium and the libraries linked into it (skia, libyuv, zlib, freetype), the pdfium-binaries MIT text,
 #      EmbedPDF's LICENSE and NOTICE, qpdf's LICENSE and NOTICE, libjpeg-turbo's two texts, and this repo's own
-# With --dry-run it stops there. Otherwise it creates a DRAFT release with the assets, compares the
-# SHA-256 GitHub computed for each uploaded asset with the local one, and only then publishes the
-# draft. If anything fails after the draft exists, the draft is deleted. The tag must already exist
-# on GitHub (--verify-tag), so this script can never create a tag.
+# With --dry-run it stops there and never calls gh. Otherwise:
+#   6. it refuses, with nothing touched, when any release or draft already exists for the tag: the releases
+#      listing (which shows drafts to a writer) must not name the tag, and repos/<repo>/releases/tags/<tag>
+#      must answer 404 (any other answer or error refuses)
+#   7. it creates a DRAFT release with the assets, then requires exactly one release for the tag, a draft, and
+#      works only by that draft's numeric id from then on (gh release edit|delete <tag> would pick a
+#      published release before a draft): it reads the draft back by id, compares the SHA-256 GitHub computed
+#      for each asset with the local file and the asset count, and only then publishes it with
+#      PATCH releases/<id> draft=false (make_latest=true for a full release, prerelease=true for
+#      "-stock-macos-only"). A release is deleted only by id and only while GitHub still reports it as a draft.
+# The tag must already exist on GitHub (--verify-tag), so this script can never create a tag.
 #
 # Environment (optional): RELEASE_REPO (default WhiteLotusLA/pdf-engine-builds), GH_BIN (default gh),
 # DIST_DIR (default <repo>/dist).
-# Exit codes: 0 ok, 1 a check failed (nothing was published), 2 usage, tool missing or malformed tag,
+# Exit codes: 0 ok, 1 a check failed, or a release or draft already exists for the tag, or GitHub could not
+#               confirm that none does (nothing was created or published),
+#             2 usage, tool missing or malformed tag,
 #             3 the tag does not match the PDFium pin in versions.env,
-#             6 GitHub's checksums disagreed with the local files (draft deleted),
-#             7 the draft could not be created (then deleted) or could not be published (left in place for inspection).
+#             6 GitHub's checksums or asset list disagreed with the local files, or the draft could not be read
+#               back (the draft was deleted by its id; nothing was published),
+#             7 the draft could not be created (a partial draft is deleted by its id), the releases for the tag
+#               after create were not exactly one draft (nothing deleted), or the draft could not be published
+#               (left in place for inspection).
 set -euo pipefail
 
 # shellcheck source=common.sh
@@ -165,33 +177,90 @@ NOTES="$TMP/notes.md"
   echo "Third-party notices are in LICENSES.zip."
 } >"$NOTES"
 
-delete_draft() {
-  "$GH" release delete "$TAG" --repo "$RELEASE_REPO" --yes >/dev/null 2>&1 || warn "could not delete the draft release $TAG; delete it by hand"
+# Every release is addressed by its numeric id, never by its tag: `gh release edit|delete <tag>` resolve a tag to
+# a published release before a draft, so a rerun after publishing could delete the release Engines.lock pins.
+releases_for_tag() { # prints "<id><TAB><draft>" for every release or draft whose tag is $TAG
+  # The REST listing shows drafts to a writer; --paginate reads every page (gh prints one array per page, or one
+  # merged array; jq -s takes either).
+  "$GH" api --paginate "repos/$RELEASE_REPO/releases?per_page=100" >"$TMP/releases.json" || return 1
+  jq -r -s --arg t "$TAG" '[.[][] | select(.tag_name == $t)] | .[] | [(.id | tostring), (.draft | tostring)] | @tsv' "$TMP/releases.json"
 }
+delete_draft() { # <id>: deletes that release only while GitHub still reports it as a draft for $TAG
+  local id="$1"
+  if ! "$GH" api "repos/$RELEASE_REPO/releases/$id" >"$TMP/delete-check.json" 2>/dev/null \
+    || ! jq -e --arg t "$TAG" '.draft == true and .tag_name == $t' "$TMP/delete-check.json" >/dev/null 2>&1; then
+    warn "release $id was not deleted: GitHub does not report it as a draft for $TAG; check it by hand"
+    return 0
+  fi
+  if "$GH" api -X DELETE "repos/$RELEASE_REPO/releases/$id" >/dev/null 2>&1; then
+    log "deleted the draft release $id ($TAG)"
+  else
+    warn "could not delete the draft release $id ($TAG); delete it by hand"
+  fi
+}
+
+# Nothing may exist for the tag yet, neither a published release (a rerun after publishing) nor a draft (left by
+# an earlier run): the listing must not name the tag, and the tag lookup, which finds published releases only,
+# must answer 404. Anything else, including any other error, refuses with nothing touched.
+rows="$(releases_for_tag)" || die 1 "could not list the releases of $RELEASE_REPO; nothing was created"
+[ -z "$rows" ] || die 1 "$RELEASE_REPO already has a release or draft for $TAG (id and draft: $(tr '\t\n' '= ' <<<"$rows")); nothing was created. A published release is never replaced; check a leftover draft and delete it by hand"
+tag_code=0
+"$GH" api -i "repos/$RELEASE_REPO/releases/tags/$TAG" >"$TMP/tag-lookup.txt" 2>"$TMP/tag-lookup.err" || tag_code=$?
+tag_status="$(head -1 "$TMP/tag-lookup.txt" | tr -d '\r' | awk '{print $2}')"
+[ "$tag_code" -ne 0 ] || die 1 "$RELEASE_REPO already has a published release for $TAG; nothing was created"
+[ "$tag_status" = 404 ] || die 1 "could not confirm that $TAG has no published release (gh api exit $tag_code, HTTP status '${tag_status:-none}'); nothing was created"
 
 flags=(--repo "$RELEASE_REPO" --draft --verify-tag --title "$TAG" --notes-file "$NOTES")
 if [ "$PRERELEASE" -eq 1 ]; then flags+=(--prerelease); else flags+=(--latest); fi
+created=1
 # shellcheck disable=SC2086
-"$GH" release create "$TAG" "${flags[@]}" $FILES || { delete_draft; die 7 "could not create the draft release $TAG; nothing is published"; }
+"$GH" release create "$TAG" "${flags[@]}" $FILES || created=0
 
-listing="$("$GH" api "repos/$RELEASE_REPO/releases?per_page=100" | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t and .draft == true)][0] | .assets[]? | [.name, .digest] | @tsv')" \
-  || { delete_draft; die 6 "could not read the draft release back from GitHub"; }
+# After create, exactly one release may carry the tag, and it must be a draft: this run's.
+rows="$(releases_for_tag)" || die 7 "could not list the releases of $RELEASE_REPO after creating the draft for $TAG; nothing was published; delete any draft for $TAG by hand"
+n="$(grep -c . <<<"$rows" || true)"
+if [ "$created" -eq 0 ]; then
+  # None existed before create, so a single draft for the tag now is this run's partial draft.
+  if [ "$n" -eq 1 ] && [ "$(cut -f2 <<<"$rows")" = true ]; then
+    delete_draft "$(cut -f1 <<<"$rows")"
+  elif [ "$n" -gt 0 ]; then
+    warn "$n release(s) for $TAG after the failed create; none was deleted; check them by hand"
+  fi
+  die 7 "could not create the draft release $TAG; nothing is published"
+fi
+if [ "$n" -ne 1 ] || [ "$(cut -f2 <<<"$rows")" != true ]; then
+  die 7 "after create, $RELEASE_REPO has $n release(s) for $TAG instead of exactly one draft (id and draft: $(tr '\t\n' '= ' <<<"$rows")); nothing was published or deleted; check them by hand"
+fi
+ID="$(cut -f1 <<<"$rows")"
+[[ "$ID" =~ ^[0-9]+$ ]] || die 7 "GitHub gave the draft for $TAG an id that is not a number: '$ID'; nothing was published"
 
+# Read the draft's assets by its id and compare the SHA-256 GitHub computed for each with the local file.
+if ! "$GH" api "repos/$RELEASE_REPO/releases/$ID" >"$TMP/draft.json" \
+  || ! listing="$(jq -r --arg t "$TAG" 'if .tag_name == $t and .draft == true then (.assets[] | [.name, (.digest // "")] | @tsv) else error("not the draft for this tag") end' "$TMP/draft.json")"; then
+  delete_draft "$ID"
+  die 6 "could not read the draft release $ID back from GitHub; nothing was published"
+fi
 for f in $FILES; do
   name="$(basename "$f")"
   want="sha256:$(shasum -a 256 "$f" | awk '{print $1}')"
   got="$(awk -F'\t' -v n="$name" '$1 == n { print $2 }' <<<"$listing")"
   if [ "$got" != "$want" ]; then
-    delete_draft
-    die 6 "GitHub reports '${got:0:19}...' for $name but the local file is '${want:0:19}...'; the draft release was deleted"
+    delete_draft "$ID"
+    die 6 "GitHub reports '${got:0:19}...' for $name but the local file is '${want:0:19}...'; nothing was published"
   fi
 done
 count="$(grep -c . <<<"$listing" || true)"
 if [ "$count" -ne "$(printf '%s\n' $FILES | wc -l | tr -d ' ')" ]; then
-  delete_draft
-  die 6 "the draft release holds $count assets but $(printf '%s\n' $FILES | wc -l | tr -d ' ') were uploaded; the draft release was deleted"
+  delete_draft "$ID"
+  die 6 "the draft release holds $count assets but $(printf '%s\n' $FILES | wc -l | tr -d ' ') were uploaded; nothing was published"
 fi
 
-"$GH" release edit "$TAG" --repo "$RELEASE_REPO" --draft=false \
-  || die 7 "could not publish the draft release $TAG; it is still a draft on GitHub"
-log "published $TAG to $RELEASE_REPO"
+# Publish by id. A full release is marked latest explicitly; a pre-release stays a pre-release and is never latest.
+# (make_latest is a string in GitHub's API, hence -f; draft and prerelease are booleans, hence -F.)
+publish_fields=(-F draft=false)
+if [ "$PRERELEASE" -eq 1 ]; then publish_fields+=(-F prerelease=true); else publish_fields+=(-f make_latest=true); fi
+"$GH" api -X PATCH "repos/$RELEASE_REPO/releases/$ID" "${publish_fields[@]}" >"$TMP/published.json" \
+  || die 7 "could not publish the draft release $TAG (id $ID); it is still a draft on GitHub"
+jq -e --arg t "$TAG" '.draft == false and .tag_name == $t' "$TMP/published.json" >/dev/null \
+  || die 7 "GitHub did not confirm that release $ID ($TAG) is published; check it by hand"
+log "published $TAG to $RELEASE_REPO (release id $ID)"
