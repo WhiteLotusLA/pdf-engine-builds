@@ -97,3 +97,24 @@ qpdf is built with native crypto only. `USE_IMPLICIT_CRYPTO=OFF` and `REQUIRE_CR
 generated `qpdf-config.h` right after configure and `scripts/check-no-tls-symbols.sh` scans every finished
 archive with `nm`. The source tarballs are pinned by SHA-256 in `sources.sha256`
 (`scripts/pin-source-checksums.sh` rewrites it when `QPDF_VERSION` or `LIBJPEG_TURBO_VERSION` changes).
+
+## Releases
+
+A release has exactly four assets: `PDFium.xcframework.zip`, `QPDF.xcframework.zip`, `LICENSES.zip` and
+`checksums.txt` (SHA-256, the format `shasum -a 256 -c` reads). Tags look like `v0.1.0-pdfium8100`; the number
+after `pdfium` must equal the pinned `PDFIUM_BRANCH`. `-stock-macos-only` tags make a pre-release with the
+stock macOS slice only (`PDFium.xcframework.zip` and `checksums.txt`).
+
+Releases are all-or-nothing. `scripts/release-publish.sh` checks the tag, the asset set, every checksum, every
+slice of both XCFrameworks and the notices before it creates a draft release, compares GitHub's own checksum
+of each uploaded file with the local one, and only then publishes. One bad slice, one wrong checksum, and
+nothing is published. To rehearse: Actions tab, `release`, "Run workflow", enter a tag, leave "dry run" ticked.
+
+## Refreshing PDFium
+
+The build repo moves to a newer PDFium release at least every 90 days, and sooner when a Chrome stable
+release note lists a PDFium security fix. `refresh-check.yml` runs every Monday; when a refresh is due the run
+fails, the reason is in the job summary and GitHub emails the repository owner. To refresh: edit `PDFIUM_BRANCH`
+(and, if needed, `EMBEDPDF_COMMIT`, `EMBEDPDF_UPSTREAM_BASE`, `DEPOT_TOOLS_COMMIT`) in `versions.env`, re-derive
+the patch series (`scripts/pdfium-patches-export.sh`), read `dist/patch-report.txt` from the CI run, tag a
+release. The app repo then moves its `Engines.lock` to the new tag.

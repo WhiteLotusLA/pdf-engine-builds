@@ -1,11 +1,27 @@
 name: release
 
-# Publishes a pre-release when a tag is pushed. Task A2 supports only stock macOS-only pre-releases
-# (tags like v0.0.1-pdfium8086-stock-macos-only); the full release with every slice comes with task A6.
+# Publishes a release when a tag is pushed, all or nothing: the release job checks every asset,
+# every slice and every checksum before it creates the release (scripts/release-publish.sh), and
+# an asset that fails any check stops the run with nothing published.
+#   v0.1.0-pdfium8100                    full release: PDFium (3 slices, EmbedPDF patches), QPDF (3 slices), notices
+#   v0.0.1-pdfium8100-stock-macos-only   pre-release: stock PDFium for macOS only
+# Manual runs (Actions tab, "Run workflow") do the whole build and the gate in dry-run mode by
+# default: nothing is published.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to check, for example v0.1.0-pdfium8100 (it does not need to exist for a dry run)"
+        required: true
+        type: string
+      dry_run:
+        description: "Check everything but publish nothing"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -16,8 +32,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      version: ${{ steps.tag.outputs.version }}
-      stock: ${{ steps.tag.outputs.stock }}
+      tag: ${{ steps.tag.outputs.tag }}
       macos_only: ${{ steps.tag.outputs.macos_only }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
@@ -26,16 +41,23 @@ jobs:
           persist-credentials: false
       - name: Validate the tag against versions.env
         id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          scripts/release-tag.sh "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
-      - name: Only stock macOS-only pre-releases exist so far
+          scripts/release-tag.sh "$TAG" | tee -a "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Only the two release shapes that have a build exist
         env:
           STOCK: ${{ steps.tag.outputs.stock }}
           MACOS_ONLY: ${{ steps.tag.outputs.macos_only }}
         run: |
-          if [ "$STOCK" != true ] || [ "$MACOS_ONLY" != true ]; then
-            echo "::error::only -stock-macos-only tags can be released until plan task A6 is done"
+          if [ "$STOCK" = true ] && [ "$MACOS_ONLY" != true ]; then
+            echo "::error::a -stock release with iOS slices has no build; use -stock-macos-only or drop -stock"
+            exit 1
+          fi
+          if [ "$STOCK" != true ] && [ "$MACOS_ONLY" = true ]; then
+            echo "::error::-macos-only releases are stock builds; the tag must end in -stock-macos-only"
             exit 1
           fi
 
@@ -44,58 +66,80 @@ jobs:
     needs: plan
     uses: ./.github/workflows/build.yml
     with:
-      include_patched: false
+      include_patched: ${{ needs.plan.outputs.macos_only != 'true' }}
     permissions:
       contents: read
 
   release:
-    name: Publish the pre-release
+    name: Check and publish
     needs: [plan, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 45
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      MACOS_ONLY: ${{ needs.plan.outputs.macos_only }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download the stock XCFramework
+      - name: Download the stock macOS XCFramework
+        if: needs.plan.outputs.macos_only == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: pdfium-stock-macos-arm64
-          path: assets
-      - name: Write and check checksums.txt
+          path: dist
+      - name: Download the three-slice PDFium XCFramework
+        if: needs.plan.outputs.macos_only != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pdfium-xcframework
+          path: dist
+      - name: Download the QPDF XCFramework
+        if: needs.plan.outputs.macos_only != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: qpdf-xcframework
+          path: dist
+      - name: Download the license notices
+        if: needs.plan.outputs.macos_only != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: licenses-*
+          path: work/licenses
+      - name: Assemble LICENSES.zip
+        if: needs.plan.outputs.macos_only != 'true'
         run: |
           set -euo pipefail
-          find assets -type f | sort
-          scripts/checksums.sh write assets PDFium.xcframework.zip
-          scripts/checksums.sh verify assets
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          ls work/licenses
+          RELEASE_TAG="$TAG" scripts/licenses.sh assemble work/licenses/*
+      - name: Write checksums.txt
         run: |
           set -euo pipefail
-          {
-            echo "PDFium XCFramework built by GitHub Actions from commit $GITHUB_SHA."
-            echo
-            echo "Stock PDFium (no EmbedPDF patches), macOS arm64 only. Build info:"
-            echo
-            sed 's/^/    /' assets/slices/macos-arm64/BUILD-INFO.txt
-          } > assets/release-notes.md
-          flags=()
-          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
-            --notes-file assets/release-notes.md ${flags[@]+"${flags[@]}"} \
-            assets/PDFium.xcframework.zip assets/checksums.txt
-      - name: Download the published assets and verify them
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          if [ "$MACOS_ONLY" = true ]; then
+            scripts/checksums.sh write dist PDFium.xcframework.zip
+          else
+            scripts/checksums.sh write dist PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+          fi
+      - name: The gate must refuse a corrupted copy
         run: |
           set -euo pipefail
-          mkdir verify
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verify --pattern PDFium.xcframework.zip --pattern checksums.txt
-          scripts/checksums.sh verify verify
-          unzip -l verify/PDFium.xcframework.zip | awk '{print $4}' | grep -qx 'PDFium.xcframework/Info.plist'
+          rm -rf work/corrupt && mkdir -p work/corrupt
+          cp dist/*.zip dist/checksums.txt work/corrupt/
+          printf 'X' >> work/corrupt/PDFium.xcframework.zip
+          if DIST_DIR="$PWD/work/corrupt" scripts/release-publish.sh "$TAG" --dry-run; then
+            echo "::error::the release gate accepted a corrupted PDFium.xcframework.zip"
+            exit 1
+          fi
+          echo "the gate refused the corrupted copy, as it must"
+      - name: Check everything, publish only when nothing is wrong
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = true ]; then
+            scripts/release-publish.sh "$TAG" --dry-run
+          else
+            scripts/release-publish.sh "$TAG"
+          fi

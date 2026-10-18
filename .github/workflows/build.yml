@@ -140,6 +140,15 @@ jobs:
         run: scripts/pdfium-build.sh macos-arm64 --embedpdf
       - name: Verify the library
         run: scripts/pdfium-verify-lib.sh dist/slices/macos-arm64/libpdfium.a --embedpdf
+      - name: Stage the PDFium license notices
+        run: scripts/licenses.sh stage-pdfium work/pdfium work/pdfium/out/macos-arm64 dist/licenses-stage/pdfium-macos-arm64
+      - name: Upload the PDFium license notices
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: licenses-pdfium-macos-arm64
+          path: dist/licenses-stage/pdfium-macos-arm64/
+          if-no-files-found: error
+          retention-days: 30
       - name: Pack PDFium.xcframework
         run: scripts/pdfium-xcframework.sh --embedpdf
       - name: Smoke test, including EPDFPage_ApplyRedactions
@@ -230,6 +239,15 @@ jobs:
             iossim-arm64) want="IOSSIMULATOR $IOS_MIN" ;;
           esac
           [ "$platform" = "$want" ] || { echo "::error::wanted $want"; exit 1; }
+      - name: Stage the PDFium license notices
+        run: scripts/licenses.sh stage-pdfium work/pdfium work/pdfium/out/${{ matrix.slice }} dist/licenses-stage/pdfium-${{ matrix.slice }}
+      - name: Upload the PDFium license notices
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: licenses-pdfium-${{ matrix.slice }}
+          path: dist/licenses-stage/pdfium-${{ matrix.slice }}/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload the slice
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -321,6 +339,17 @@ jobs:
       - name: Native crypto survives a poisoned environment
         if: matrix.slice == 'macos-arm64'
         run: scripts/tests/qpdf-poison-ci.sh
+      - name: Stage the qpdf and libjpeg-turbo license notices
+        if: matrix.slice == 'macos-arm64'
+        run: scripts/licenses.sh stage-qpdf dist/licenses-stage/qpdf
+      - name: Upload the qpdf and libjpeg-turbo license notices
+        if: matrix.slice == 'macos-arm64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: licenses-qpdf
+          path: dist/licenses-stage/qpdf/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload the slice
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -1,0 +1,27 @@
+name: refresh-check
+
+# Weekly check that the PDFium pin does not go stale. It fails (and GitHub emails the repository
+# owner about the failed scheduled run) when a newer chromium branch exists and the pin is 90 days
+# old or older, or when a Chrome release note after the pin date lists a security fix in PDFium or
+# in PDF. The reason is in the job summary. See scripts/refresh-check.sh.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-check:
+    name: Is the PDFium pin due for a refresh?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the pin
+        run: scripts/refresh-check.sh
