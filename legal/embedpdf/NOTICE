@@ -1,0 +1,25 @@
+CloudPDF Runtime Additions
+Copyright 2025-2026 CloudPDF LTD
+
+Files identified in scripts/embedpdf-runtime/cloudpdf-owned-source-files.txt
+and marked with SPDX-License-Identifier: Apache-2.0 are licensed by
+CloudPDF LTD under the Apache License, Version 2.0. The Apache License text
+is included in this repository's LICENSE file.
+
+This repository is based on PDFium. PDFium source and source derived from
+PDFium remain subject to PDFium's BSD-style license and retain their original
+copyright and license notices. Third-party components and test assets remain
+subject to their respective upstream licenses. The CloudPDF Apache-2.0 notice
+does not replace or supersede those upstream terms.
+
+The following source files were reintroduced or adapted in CloudPDF commits
+but intentionally retain PDFium attribution because their provenance is
+upstream PDFium:
+
+  core/fxcodec/png/pngmodule.cpp
+  core/fxcodec/png/pngmodule.h
+  fpdfsdk/epdf_flatten.cpp
+
+Patch artifacts under patches/embedpdf-runtime and binary or generated test
+resources are excluded from the CloudPDF-owned source manifest unless they
+contain standalone CloudPDF-authored source.
