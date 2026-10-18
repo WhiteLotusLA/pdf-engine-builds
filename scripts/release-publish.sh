@@ -4,7 +4,8 @@
 # The all-or-nothing gate in front of `gh release create`. It checks everything that goes into
 # dist/ first and publishes only when every check passes:
 #   1. the tag is valid for scripts/release-tag.sh: v<major>.<minor>.<patch>-pdfium<NNNN>[-stock][-macos-only]
-#      with NNNN equal to the PDFium branch number pinned in versions.env
+#      with NNNN equal to the PDFium branch number pinned in versions.env, in one of the two shapes that have
+#      a build: the full release (no suffix) or "-stock-macos-only"
 #   2. dist/ holds exactly the release assets (full release: PDFium.xcframework.zip,
 #      QPDF.xcframework.zip, LICENSES.zip, checksums.txt; "-macos-only": PDFium.xcframework.zip and
 #      checksums.txt) and every SHA-256 in checksums.txt matches (scripts/checksums.sh verify)
@@ -68,8 +69,17 @@ require_cmd "$GH" jq shasum ditto nm comm
 tag_info="$("$COMMON_SH_DIR/release-tag.sh" "$TAG")" || exit $?
 MACOS_ONLY=0
 PRERELEASE=0
+STOCK=0
 grep -qx 'macos_only=true' <<<"$tag_info" && MACOS_ONLY=1
 grep -qx 'prerelease=true' <<<"$tag_info" && PRERELEASE=1
+grep -qx 'stock=true' <<<"$tag_info" && STOCK=1
+# Only two shapes have a build (release.yml's plan job refuses the others too): the full release, patched with
+# every slice, and the stock macOS-only pre-release. The release notes below rely on it.
+if [ "$STOCK" -eq 1 ] && [ "$MACOS_ONLY" -eq 0 ]; then
+  die 2 "tag '$TAG': a -stock release with iOS slices has no build; use -stock-macos-only or drop -stock"
+elif [ "$STOCK" -eq 0 ] && [ "$MACOS_ONLY" -eq 1 ]; then
+  die 2 "tag '$TAG': -macos-only releases are stock builds; the tag must end in -stock-macos-only"
+fi
 require_env PDFIUM_BRANCH
 
 if [ "$MACOS_ONLY" -eq 1 ]; then
@@ -170,12 +180,23 @@ if [ "$DRY" -eq 1 ]; then
 fi
 
 # --- publish: draft, compare GitHub's checksums, then publish ---
+# The notes name only what ships. The stock macOS-only pre-release has no qpdf and no LICENSES.zip (its assets are
+# PDFium.xcframework.zip and checksums.txt), so its notes point to PDFium's own license text instead.
 NOTES="$TMP/notes.md"
-{
-  echo "PDFium branch $PDFIUM_BRANCH; qpdf $QPDF_VERSION; libjpeg-turbo $LIBJPEG_TURBO_VERSION."
-  echo "Slices: $PDFIUM_SLICES. Verify the downloads against checksums.txt (SHA-256)."
-  echo "Third-party notices are in LICENSES.zip."
-} >"$NOTES"
+if [ "$MACOS_ONLY" -eq 1 ]; then
+  {
+    echo "Stock PDFium $PDFIUM_BRANCH (no EmbedPDF patches), macOS only."
+    echo "Slices: $PDFIUM_SLICES. Verify the download against checksums.txt (SHA-256)."
+    echo "License: PDFium is BSD-3-Clause. Its license text: https://pdfium.googlesource.com/pdfium/+/refs/heads/$PDFIUM_BRANCH/LICENSE"
+    echo "The libraries built into it keep their own licenses, in PDFium's third_party/ folder at the same branch."
+  } >"$NOTES"
+else
+  {
+    echo "PDFium branch $PDFIUM_BRANCH; qpdf $QPDF_VERSION; libjpeg-turbo $LIBJPEG_TURBO_VERSION."
+    echo "Slices: $PDFIUM_SLICES. Verify the downloads against checksums.txt (SHA-256)."
+    echo "Third-party notices are in LICENSES.zip."
+  } >"$NOTES"
+fi
 
 # Every release is addressed by its numeric id, never by its tag: `gh release edit|delete <tag>` resolve a tag to
 # a published release before a draft, so a rerun after publishing could delete the release Engines.lock pins.

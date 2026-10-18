@@ -292,6 +292,8 @@ check "the draft is read back by its id, then published by its id with make_late
 check "the release table holds exactly one release for the tag, published" \
   $([ "$(releases "[.[] | select(.tag_name == \"$TAG\") | [.id, .draft, .make_latest]]")" = '[[1,false,"true"]]' ]; echo $?)
 check "nothing was deleted, and nothing was addressed by its tag" $(no_delete && no_by_tag; echo $?)
+check "the full release's notes name qpdf, libjpeg-turbo and LICENSES.zip" \
+  $(grep -q "qpdf $QPDF_VERSION" "$NOTES_COPY" && grep -q "libjpeg-turbo $LIBJPEG_TURBO_VERSION" "$NOTES_COPY" && grep -q "LICENSES.zip" "$NOTES_COPY"; echo $?)
 
 # a published release already exists for the tag (a rerun after publishing): refuse before create, touch nothing
 SEED="$(published_seed "$TAG" 7)" publish "$FULL" "$TAG"
@@ -536,6 +538,19 @@ check "the macOS-only pre-release publishes as a pre-release, not as latest" $([
 check "the macOS-only pre-release is published by its id as a pre-release, without make_latest" \
   $([ "$(tail -1 "$LOG")" = "api -X PATCH repos/example/repo/releases/1 -F draft=false -F prerelease=true" ] \
     && [ "$(releases '[.[] | [.id, .draft, .prerelease]]')" = '[[1,false,true]]' ]; echo $?)
+# its notes name only what ships (stock PDFium, the macOS slice) and where PDFium's BSD license text lives
+check "the macOS-only notes name stock PDFium, its branch and the macos-arm64 slice" \
+  $(grep -q "Stock PDFium $PDFIUM_BRANCH (no EmbedPDF patches)" "$NOTES_COPY" && grep -q "macos-arm64" "$NOTES_COPY"; echo $?)
+check "the macOS-only notes point to PDFium's license text at the pinned branch" \
+  $(grep -q "https://pdfium.googlesource.com/pdfium/+/refs/heads/$PDFIUM_BRANCH/LICENSE" "$NOTES_COPY" && grep -q "BSD-3-Clause" "$NOTES_COPY"; echo $?)
+check "the macOS-only notes never mention qpdf, libjpeg-turbo or LICENSES.zip (none of them ships)" \
+  $(! grep -qiE "qpdf|libjpeg|LICENSES\.zip" "$NOTES_COPY"; echo $?)
+
+# the two tag shapes that have no build are refused by the gate too, not only by release.yml's plan job
+publish "$MAC" "v0.0.1-pdfium${PDFIUM_BRANCH#chromium/}-macos-only" --dry-run
+check "a -macos-only tag that is not stock is refused (exit 2)" $([ "$code" -eq 2 ] && grep -q "must end in -stock-macos-only" <<<"$out"; echo $?)
+publish "$FULL" "v0.1.0-pdfium${PDFIUM_BRANCH#chromium/}-stock" --dry-run
+check "a -stock tag with iOS slices is refused (exit 2)" $([ "$code" -eq 2 ] && grep -q "has no build" <<<"$out"; echo $?)
 
 if [ "$failures" -gt 0 ]; then
   echo "release-gate-test: $failures failure(s)"
