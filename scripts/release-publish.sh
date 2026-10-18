@@ -15,12 +15,15 @@
 #      (Headers/module.modulemap at the root naming `umbrella header "PDFium/PDFium.h"`, the
 #      umbrella header in Headers/PDFium/, no PDFium.h at the Headers root)
 #   4. in every slice, libpdfium.a and libqpdf.a define no symbol in common: both carry a libjpeg, and in a
-#      static link the first archive that defines a name wins, so a shared name could silently bind qpdf to
-#      PDFium's copy (or the other way round) with no link error. nm failing, listing no definitions, or not
-#      listing the engine's anchor symbol (_FPDF_InitLibrary in PDFium, _qpdf_init from qpdf's C API) refuses.
+#      static link a shared name either binds qpdf to PDFium's copy (or the other way round) without a word,
+#      or, when both archive members are pulled in, fails the app's link with a duplicate symbol (hidden
+#      "private external" definitions count: they are global within a static link). nm failing, listing no
+#      definitions, or not listing the engine's anchor symbol (_FPDF_InitLibrary in PDFium, _qpdf_init from
+#      qpdf's C API) refuses.
 #   5. LICENSES.zip holds, each non-empty, a README.txt and every notice licenses.sh adds for a full release:
 #      PDFium and the libraries linked into it (skia, libyuv, zlib, freetype), the pdfium-binaries MIT text,
 #      EmbedPDF's LICENSE and NOTICE, qpdf's LICENSE and NOTICE, libjpeg-turbo's two texts, and this repo's own
+#      LICENSE and NOTICE
 # With --dry-run it stops there and never calls gh. Otherwise:
 #   6. it refuses, with nothing touched, when any release or draft already exists for the tag: the releases
 #      listing (which shows drafts to a writer) must not name the tag, and repos/<repo>/releases/tags/<tag>
@@ -37,7 +40,7 @@
 # DIST_DIR (default <repo>/dist).
 # Exit codes: 0 ok, 1 a check failed, or a release or draft already exists for the tag, or GitHub could not
 #               confirm that none does (nothing was created or published),
-#             2 usage, tool missing or malformed tag,
+#             2 usage, tool missing, malformed tag, or a tag shape that has no build (-stock alone, -macos-only alone),
 #             3 the tag does not match the PDFium pin in versions.env,
 #             6 GitHub's checksums or asset list disagreed with the local files, or the draft could not be read
 #               back (the draft was deleted by its id; nothing was published),
