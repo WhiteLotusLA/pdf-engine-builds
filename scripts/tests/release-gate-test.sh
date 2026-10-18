@@ -68,14 +68,19 @@ zip_framework() { # <dist dir> <name> <slice kinds...>
   rm -f "$dist/$name.xcframework.zip"
   ditto -c -k --keepParent "$WORK/build/$name.xcframework" "$dist/$name.xcframework.zip"
 }
-zip_licenses() { # <dist dir> [omit: a notice file to leave out, relative to LICENSES/]
+# Every notice the gate requires in a full release's LICENSES.zip (what scripts/licenses.sh assemble adds).
+REQUIRED_NOTICES="README.txt pdfium/pdfium.txt pdfium/skia.txt pdfium/libyuv.txt pdfium/zlib.txt pdfium/freetype.txt
+  pdfium-binaries/LICENSE embedpdf/LICENSE embedpdf/NOTICE qpdf/LICENSE.txt qpdf/NOTICE.md
+  libjpeg-turbo/LICENSE.md libjpeg-turbo/README.ijg pdf-engine-builds/LICENSE pdf-engine-builds/NOTICE"
+zip_licenses() { # <dist dir> [omit: a notice file to leave out, relative to LICENSES/] [empty: one to leave empty]
+  local f
   rm -rf "$WORK/build/LICENSES"
-  mkdir -p "$WORK/build/LICENSES/pdfium" "$WORK/build/LICENSES/qpdf" "$WORK/build/LICENSES/pdfium-binaries"
-  printf 'readme\n' >"$WORK/build/LICENSES/README.txt"
-  printf 'pdfium license\n' >"$WORK/build/LICENSES/pdfium/pdfium.txt"
-  printf 'qpdf license\n' >"$WORK/build/LICENSES/qpdf/LICENSE.txt"
-  printf 'pdfium-binaries MIT\n' >"$WORK/build/LICENSES/pdfium-binaries/LICENSE"
+  for f in $REQUIRED_NOTICES pdfium/icu.txt; do
+    mkdir -p "$(dirname "$WORK/build/LICENSES/$f")"
+    printf 'notice text of %s\n' "$f" >"$WORK/build/LICENSES/$f"
+  done
   if [ -n "${2:-}" ]; then rm -f "$WORK/build/LICENSES/$2"; fi
+  if [ -n "${3:-}" ]; then : >"$WORK/build/LICENSES/$3"; fi
   rm -f "$1/LICENSES.zip"
   (cd "$WORK/build" && ditto -c -k --keepParent LICENSES "$1/LICENSES.zip")
 }
@@ -244,6 +249,26 @@ zip_licenses "$BAD" pdfium-binaries/LICENSE
 write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
 publish "$BAD" "$TAG"
 check "a LICENSES.zip without pdfium-binaries/LICENSE aborts the release" $([ "$code" -eq 1 ] && grep -q "pdfium-binaries/LICENSE" <<<"$out" && no_create; echo $?)
+
+# Skia's path code is linked into the patched libpdfium.a (patch 0002), so its notice must ship
+BAD="$WORK/no-skia"
+full_dist "$BAD"
+zip_licenses "$BAD" pdfium/skia.txt
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+publish "$BAD" "$TAG"
+check "a LICENSES.zip without pdfium/skia.txt aborts the release (exit 1, names it)" $([ "$code" -eq 1 ] && grep -q "LICENSES.zip is missing LICENSES/pdfium/skia.txt" <<<"$out" && no_create; echo $?)
+# every other required notice, one at a time (dry runs: nothing reaches gh either way)
+for f in $REQUIRED_NOTICES; do
+  [ "$f" = pdfium/skia.txt ] && continue
+  zip_licenses "$BAD" "$f"
+  write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+  publish "$BAD" "$TAG" --dry-run
+  check "a LICENSES.zip without $f aborts the release" $([ "$code" -eq 1 ] && grep -q "LICENSES.zip is missing LICENSES/$f" <<<"$out"; echo $?)
+done
+zip_licenses "$BAD" "" embedpdf/NOTICE
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+publish "$BAD" "$TAG" --dry-run
+check "an empty embedpdf/NOTICE aborts the release" $([ "$code" -eq 1 ] && grep -q "LICENSES.zip is missing LICENSES/embedpdf/NOTICE" <<<"$out"; echo $?)
 
 # a tag that does not match the pinned PDFium branch, and a malformed tag
 publish "$FULL" "v0.1.0-pdfium9999"

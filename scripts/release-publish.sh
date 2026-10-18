@@ -17,7 +17,9 @@
 #      static link the first archive that defines a name wins, so a shared name could silently bind qpdf to
 #      PDFium's copy (or the other way round) with no link error. nm failing, listing no definitions, or not
 #      listing the engine's anchor symbol (_FPDF_InitLibrary in PDFium, _qpdf_init from qpdf's C API) refuses.
-#   5. LICENSES.zip holds a README.txt, the PDFium notices, the pdfium-binaries MIT text and the qpdf notices
+#   5. LICENSES.zip holds, each non-empty, a README.txt and every notice licenses.sh adds for a full release:
+#      PDFium and the libraries linked into it (skia, libyuv, zlib, freetype), the pdfium-binaries MIT text,
+#      EmbedPDF's LICENSE and NOTICE, qpdf's LICENSE and NOTICE, libjpeg-turbo's two texts, and this repo's own
 # With --dry-run it stops there. Otherwise it creates a DRAFT release with the assets, compares the
 # SHA-256 GitHub computed for each uploaded asset with the local one, and only then publishes the
 # draft. If anything fails after the draft exists, the draft is deleted. The tag must already exist
@@ -133,11 +135,18 @@ for id in $QPDF_SLICES; do
 done
 
 # --- 5. the notices ---
+# Every notice scripts/licenses.sh assemble adds for a full release, each non-empty. A full release always carries
+# the EmbedPDF patches (release.yml builds the patched variant for every tag that is not -stock-macos-only), so
+# embedpdf/ is required whatever the checkout's patches/ folder holds. Skia (patch 0002's path code) and libyuv
+# are linked into libpdfium.a; zlib and freetype are linked into every PDFium build.
+REQUIRED_NOTICES="README.txt pdfium/pdfium.txt pdfium/skia.txt pdfium/libyuv.txt pdfium/zlib.txt pdfium/freetype.txt
+  pdfium-binaries/LICENSE embedpdf/LICENSE embedpdf/NOTICE qpdf/LICENSE.txt qpdf/NOTICE.md
+  libjpeg-turbo/LICENSE.md libjpeg-turbo/README.ijg pdf-engine-builds/LICENSE pdf-engine-builds/NOTICE"
 if [ "$MACOS_ONLY" -eq 0 ]; then
   mkdir -p "$TMP/LICENSES"
   ditto -x -k "$DIST_DIR/LICENSES.zip" "$TMP/LICENSES"
-  for f in README.txt pdfium/pdfium.txt pdfium-binaries/LICENSE qpdf/LICENSE.txt; do
-    [ -s "$TMP/LICENSES/LICENSES/$f" ] || die 1 "LICENSES.zip is missing LICENSES/$f"
+  for f in $REQUIRED_NOTICES; do
+    [ -s "$TMP/LICENSES/LICENSES/$f" ] || die 1 "LICENSES.zip is missing LICENSES/$f (or it is empty)"
   done
 fi
 
