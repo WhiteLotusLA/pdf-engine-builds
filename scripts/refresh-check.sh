@@ -60,6 +60,10 @@ grep -q '<entry' "$TMP/feed.xml" || die 3 "the Chrome Releases feed has no entri
 PIN_DATE="${REFRESH_PIN_DATE:-}"
 if [ -z "$PIN_DATE" ]; then
   require_cmd git
+  # In a shallow clone the oldest commit looks like it changed every line, so git log would report the
+  # date of the tip commit as the pin date: plausible and wrong. Refuse instead of guessing.
+  [ "$(git -C "$REPO_ROOT" rev-parse --is-shallow-repository 2>/dev/null || true)" != true ] \
+    || die 3 "this is a shallow clone, so the date the pin was adopted cannot be read from git; check out with fetch-depth: 0 or set REFRESH_PIN_DATE"
   PIN_DATE="$(git -C "$REPO_ROOT" log -1 --format=%cs -G'^PDFIUM_BRANCH=' -- versions.env 2>/dev/null || true)"
 fi
 date_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
