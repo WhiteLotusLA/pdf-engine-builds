@@ -45,7 +45,9 @@ plan="$(dry macos-arm64)"
 check "macos: native build, no CMAKE_SYSTEM_NAME" $(has "$plan" "-DCMAKE_OSX_SYSROOT=macosx" && lacks "$plan" "-DCMAKE_SYSTEM_NAME"; echo $?)
 plan="$(dry ios-arm64)"
 check "ios device: iOS system name and iphoneos SDK" $(has "$plan" "-DCMAKE_SYSTEM_NAME=iOS" && has "$plan" "-DCMAKE_OSX_SYSROOT=iphoneos"; echo $?)
+check "ios device: system processor is set (libjpeg-turbo needs it when cross compiling)" $(has "$plan" "-DCMAKE_SYSTEM_PROCESSOR=aarch64"; echo $?)
 plan="$(dry iossim-arm64)"
+check "ios simulator: system processor is set" $(has "$plan" "-DCMAKE_SYSTEM_PROCESSOR=aarch64"; echo $?)
 check "ios simulator: iOS system name and iphonesimulator SDK" $(has "$plan" "-DCMAKE_SYSTEM_NAME=iOS" && has "$plan" "-DCMAKE_OSX_SYSROOT=iphonesimulator"; echo $?)
 
 plan="$(dry macos-arm64 QB_ALLOW_IMPLICIT_CRYPTO=1)"

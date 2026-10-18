@@ -142,7 +142,9 @@ common=(
 )
 system=()
 if [ "$SYSTEM_NAME" = "iOS" ]; then
-  system=(-DCMAKE_SYSTEM_NAME=iOS)
+  # CMAKE_SYSTEM_PROCESSOR is empty in an iOS cross build and libjpeg-turbo's CMakeLists fails on it
+  # ("string no output variable specified", seen in CI run 39082704455).
+  system=(-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=aarch64)
 fi
 
 # Crypto: native only. USE_IMPLICIT_CRYPTO=OFF stops qpdf's CMake from even looking for GnuTLS or
