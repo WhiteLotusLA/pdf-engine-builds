@@ -64,5 +64,39 @@ run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
 run verify "$WORK/d"
 check "verify passes again on a clean checksums.txt" $([ "$code" -eq 0 ]; echo $?)
 
+# shasum -c picks the algorithm from each line's hex length and ignores -a 256, so SHA-1 (40 hex) and
+# SHA-512 (128 hex) lines would verify; checksums.txt promises SHA-256, so verify refuses them
+(cd "$WORK/d" && shasum -a 1 PDFium.xcframework.zip QPDF.xcframework.zip >checksums.txt)
+run verify "$WORK/d"
+check "verify refuses SHA-1 lines although they match the files (exit 1, names line 1)" \
+  $([ "$code" -eq 1 ] && grep -q "checksum verification failed" <<<"$out" && grep -q "line 1 is not a SHA-256 line" <<<"$out"; echo $?)
+(cd "$WORK/d" && shasum -a 512 PDFium.xcframework.zip QPDF.xcframework.zip >checksums.txt)
+run verify "$WORK/d"
+check "verify refuses SHA-512 lines although they match the files (exit 1)" \
+  $([ "$code" -eq 1 ] && grep -q "line 1 is not a SHA-256 line" <<<"$out"; echo $?)
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+awk 'NR == 1 { print toupper($1) "  " $2 }' "$WORK/d/checksums.txt" >"$WORK/d/upper.txt"
+mv "$WORK/d/upper.txt" "$WORK/d/checksums.txt"
+run verify "$WORK/d"
+check "verify refuses an uppercase hex digest (exit 1)" $([ "$code" -eq 1 ] && grep -q "line 1 is not a SHA-256 line" <<<"$out"; echo $?)
+
+# asset names are plain file names: a line naming a file in a subfolder is refused even when it matches
+mkdir -p "$WORK/d/sub"
+printf 'gamma' >"$WORK/d/sub/extra.zip"
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+(cd "$WORK/d" && shasum -a 256 sub/extra.zip >>checksums.txt)
+run verify "$WORK/d"
+check "verify refuses a line whose name has a slash, although it matches (exit 1, names line 3)" \
+  $([ "$code" -eq 1 ] && grep -q "line 3 is not a SHA-256 line" <<<"$out"; echo $?)
+
+# binary-mode lines ("hash *name") are not what write produces
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+(cd "$WORK/d" && shasum -a 256 -b PDFium.xcframework.zip >checksums.txt)
+run verify "$WORK/d"
+check "verify refuses a binary-mode line ('hash *name') (exit 1)" $([ "$code" -eq 1 ] && grep -q "line 1 is not a SHA-256 line" <<<"$out"; echo $?)
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+run verify "$WORK/d"
+check "verify still passes on what write produces" $([ "$code" -eq 0 ]; echo $?)
+
 if [ "$failures" -gt 0 ]; then echo "checksums-test: $failures failure(s)"; exit 1; fi
 echo "checksums-test: all passed"
