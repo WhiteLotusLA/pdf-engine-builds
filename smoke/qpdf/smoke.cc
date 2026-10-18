@@ -16,6 +16,7 @@
 #include <qpdf/QPDFPageDocumentHelper.hh>
 #include <qpdf/QPDFPageLabelDocumentHelper.hh>
 #include <qpdf/QPDFWriter.hh>
+#include <qpdf/QPDFXRefEntry.hh>
 
 #include <cstdio>
 #include <exception>
@@ -155,6 +156,15 @@ int main(int argc, char** argv)
                   third.getKey("/St").isInteger() && third.getKey("/St").getIntValue() == 1,
               "page index 2 restarts decimal numbering at 1");
         check(relabelled.getWarnings().empty(), "reopening the saved file produced no warnings");
+        // Object streams were requested: at least one xref entry must be type 2 (compressed).
+        bool has_compressed = false;
+        for (auto const& entry : relabelled.getXRefTable()) {
+            if (entry.second.getType() == 2) {
+                has_compressed = true;
+                break;
+            }
+        }
+        check(has_compressed, "the saved file stores objects in an object stream (xref type 2 entry)");
 
         // 7. The same structural check as `qpdf --check`.
         char const* const job_args[] = {"qpdf", "--check", final_path.c_str(), nullptr};

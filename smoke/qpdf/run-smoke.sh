@@ -59,6 +59,11 @@ case "$MODE" in
     # Arm64 code in a simulator runs on the macOS kernel and must carry at least an ad-hoc signature.
     codesign --force --sign - "$TMP/smoke"
     xcrun simctl bootstatus "$UDID" -b >/dev/null
-    xcrun simctl spawn "$UDID" "$TMP/smoke" "$TMP"
+    # Capture the output and require the success line, not only the exit status.
+    sim_status=0
+    xcrun simctl spawn "$UDID" "$TMP/smoke" "$TMP" >"$TMP/sim.out" 2>&1 || sim_status=$?
+    cat "$TMP/sim.out"
+    [ "$sim_status" -eq 0 ] || die 1 "the smoke program failed inside the simulator (exit $sim_status)"
+    grep -qx 'qpdf smoke: all passed' "$TMP/sim.out" || die 1 "the simulator run did not print 'qpdf smoke: all passed'"
     ;;
 esac
