@@ -85,3 +85,15 @@ The iOS slices need pdfium-binaries' iOS patch (`patches/pdfium-binaries/`, MIT,
 The libraries are static, so nothing is embedded in an app: the app target links the XCFramework.
 `scripts/verify-xcframework.sh` checks a framework's slices, architecture, headers, platform and minimum OS.
 `smoke/pdfium/ios-app` is an iPad-only app that links the framework; CI runs its tests on an iPad simulator.
+
+## QPDF.xcframework
+
+`QPDF.xcframework` holds static `libqpdf.a` for `macos-arm64`, `ios-arm64` and `ios-arm64-simulator`, with
+libjpeg-turbo merged in, zlib taken from the SDK (`-lz`) and qpdf's headers under `Headers/qpdf/`. There is
+no module map: only the C++ shim in the app repo includes these headers.
+
+qpdf is built with native crypto only. `USE_IMPLICIT_CRYPTO=OFF` and `REQUIRE_CRYPTO_NATIVE=ON` keep GnuTLS
+(LGPL) and OpenSSL out even when the build machine has them; `scripts/qpdf-config-guard.sh` checks the
+generated `qpdf-config.h` right after configure and `scripts/check-no-tls-symbols.sh` scans every finished
+archive with `nm`. The source tarballs are pinned by SHA-256 in `sources.sha256`
+(`scripts/pin-source-checksums.sh` rewrites it when `QPDF_VERSION` or `LIBJPEG_TURBO_VERSION` changes).
