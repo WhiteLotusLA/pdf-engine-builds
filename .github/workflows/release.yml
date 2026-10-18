@@ -9,7 +9,8 @@ name: release
 # default: nothing is published. A run with dry run unticked must be started from the tag itself
 # ("Use workflow from": the tag), so the release is built from the tag's own commit; from any other
 # ref the plan job fails. To retry a failed tag run, use "Re-run failed jobs" on that run.
-# Only one release job per tag runs at a time (concurrency group release-<tag>).
+# Only one real release job per tag runs at a time (concurrency group release-<tag>). Every dry run has a group
+# of its own (release-dry-<run id>), so a dry run can neither wait behind nor cancel a real release.
 
 on:
   push:
@@ -101,9 +102,12 @@ jobs:
     needs: [plan, build]
     runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 45
-    # one release job per tag at a time; a second one waits instead of racing the first one's draft
+    # One real release job per tag at a time; a second one waits instead of racing the first one's draft. GitHub
+    # cancels a pending job in a group when a newer one queues, so a dry run (which never calls gh and cannot
+    # race a draft) gets a group of its own, keyed on its run id: a dry-run dispatch queued while a real release
+    # job waits must never cancel the real one.
     concurrency:
-      group: release-${{ needs.plan.outputs.tag }}
+      group: ${{ needs.plan.outputs.dry_run == 'true' && format('release-dry-{0}', github.run_id) || format('release-{0}', needs.plan.outputs.tag) }}
       cancel-in-progress: false
     permissions:
       contents: write

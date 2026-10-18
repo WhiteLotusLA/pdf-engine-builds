@@ -42,9 +42,11 @@ export FAKE_GH_LOG="$LOG"
 # Knobs: FAKE_CREATE_FAIL=1 (create uploads only the first asset, then fails) or =nodraft (fails before
 # any draft exists); FAKE_CREATE_PUBLISHED=1 (the new release is not a draft); FAKE_SECOND_DRAFT=1 (a
 # second draft with the same tag appears); FAKE_WRONG_DIGEST=<asset> and FAKE_NULL_DIGEST=<asset>;
-# FAKE_EXTRA_ASSET=1; FAKE_LISTING_HIDES=1 (the listing is empty); FAKE_API_FAIL=<glob over "METHOD path">
-# (HTTP 500), with FAKE_API_FAIL_ONCE=1 only the first match fails; FAKE_FLIP_ON_GET=<n> (from the n-th
-# read of a release by id on, that release is published, as if someone else published it).
+# FAKE_EXTRA_ASSET=1; FAKE_LISTING_HIDES=1 (the listing is empty) or =after_create (empty only once `release
+# create` has run, so the new draft is not shown); FAKE_API_FAIL=<glob over "METHOD path"> (HTTP 500), with
+# FAKE_API_FAIL_ONCE=1 only the first match fails and with FAKE_API_FAIL_AFTER_CREATE=1 only matches after
+# `release create` has run; FAKE_FLIP_ON_GET=<n> (from the n-th read of a release by id on, that release is
+# published, as if someone else published it).
 mkdir -p "$WORK/bin"
 cat >"$WORK/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
@@ -65,6 +67,7 @@ add_release() { # <tag> <draft> <prerelease> <assets JSON>
 }
 
 if [ "${1:-} ${2:-}" = "release create" ]; then
+  : >"$T.created"
   tag="$3"
   shift 3
   pre=false
@@ -121,7 +124,8 @@ if [ "${1:-}" = "api" ]; then
       *) path="$1"; shift ;;
     esac
   done
-  if [ -n "${FAKE_API_FAIL:-}" ] && [[ "$method $path" == $FAKE_API_FAIL ]] && [ ! -e "$T.failed-once" ]; then
+  if [ -n "${FAKE_API_FAIL:-}" ] && [[ "$method $path" == $FAKE_API_FAIL ]] && [ ! -e "$T.failed-once" ] \
+    && { [ "${FAKE_API_FAIL_AFTER_CREATE:-0}" != 1 ] || [ -e "$T.created" ]; }; then
     if [ "${FAKE_API_FAIL_ONCE:-0}" = 1 ]; then : >"$T.failed-once"; fi
     if [ "$include" -eq 1 ]; then printf 'HTTP/2.0 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n'; fi
     echo "gh: Server Error (HTTP 500)" >&2
@@ -129,7 +133,11 @@ if [ "${1:-}" = "api" ]; then
   fi
   case "$method $path" in
     "GET repos/example/repo/releases?per_page=100")
-      if [ "${FAKE_LISTING_HIDES:-0}" = 1 ]; then echo '[]'; else cat "$T"; fi
+      if [ "${FAKE_LISTING_HIDES:-0}" = 1 ] || { [ "${FAKE_LISTING_HIDES:-0}" = after_create ] && [ -e "$T.created" ]; }; then
+        echo '[]'
+      else
+        cat "$T"
+      fi
       ;;
     "GET repos/example/repo/releases/tags/"*)
       rel="$(jq -c --arg t "${path##*/releases/tags/}" '[.[] | select(.tag_name == $t and .draft == false)][0] // empty' "$T")"
@@ -329,6 +337,19 @@ check "two drafts for the tag after create: exit 7, nothing published or deleted
 FAKE_CREATE_PUBLISHED=1 publish "$FULL" "$TAG"
 check "a created release that is not a draft: exit 7, never deleted" \
   $([ "$code" -eq 7 ] && grep -q "instead of exactly one draft" <<<"$out" && no_patch && no_delete; echo $?)
+# the listing after create does not show the new draft (a lagging or filtered listing): the gate cannot tell what
+# it created, so it publishes nothing and deletes nothing; the draft stays for a person to inspect
+FAKE_LISTING_HIDES=after_create publish "$FULL" "$TAG"
+check "a post-create listing that omits the new draft: exit 7, names 0 releases, nothing published or deleted" \
+  $([ "$code" -eq 7 ] && grep -q "after create, example/repo has 0 release(s) for $TAG instead of exactly one draft" <<<"$out" \
+    && [ "$(grep -c '^release create' "$LOG")" -eq 1 ] && no_patch && no_delete && no_by_tag; echo $?)
+check "the draft the listing did not show is left in place" $([ "$(releases '[.[] | [.id, .draft]]')" = '[[1,true]]' ]; echo $?)
+# the listing after create fails (HTTP 500): same outcome, with the message that tells a person to look by hand
+FAKE_API_FAIL="GET repos/example/repo/releases?per_page=100" FAKE_API_FAIL_AFTER_CREATE=1 publish "$FULL" "$TAG"
+check "a post-create listing that fails: exit 7, tells the person to delete any draft by hand, nothing deleted" \
+  $([ "$code" -eq 7 ] && grep -q "could not list the releases of example/repo after creating the draft for $TAG; nothing was published; delete any draft for $TAG by hand" <<<"$out" \
+    && [ "$(grep -c '^release create' "$LOG")" -eq 1 ] && no_patch && no_delete && no_by_tag; echo $?)
+check "the draft is left in place when the post-create listing fails" $([ "$(releases '[.[] | [.id, .draft]]')" = '[[1,true]]' ]; echo $?)
 
 # publishing fails: the draft stays for inspection, nothing else happens
 FAKE_API_FAIL="PATCH *" publish "$FULL" "$TAG"
@@ -551,6 +572,41 @@ publish "$MAC" "v0.0.1-pdfium${PDFIUM_BRANCH#chromium/}-macos-only" --dry-run
 check "a -macos-only tag that is not stock is refused (exit 2)" $([ "$code" -eq 2 ] && grep -q "must end in -stock-macos-only" <<<"$out"; echo $?)
 publish "$FULL" "v0.1.0-pdfium${PDFIUM_BRANCH#chromium/}-stock" --dry-run
 check "a -stock tag with iOS slices is refused (exit 2)" $([ "$code" -eq 2 ] && grep -q "has no build" <<<"$out"; echo $?)
+
+# === release.yml: the release job's concurrency group ===
+# GitHub cancels a pending job in a concurrency group when a newer one queues. A dry run never calls gh, so it
+# cannot race a real release's draft and has no reason to share the real release's group: if it did, a dry-run
+# dispatch queued while a real release job waits would cancel the real one. This reads the group expression out of
+# the workflow and evaluates its two templates for sample runs (the job-level `concurrency` may use `needs`).
+WF="$REPO/.github/workflows/release.yml"
+conc="$(awk '
+  /^  release:/ { injob = 1; next }
+  injob && /^  [A-Za-z0-9_-]+:/ { injob = 0 }
+  injob && /^    concurrency:/ { inblock = 1; next }
+  inblock && /^    [A-Za-z]/ { inblock = 0 }
+  inblock { print }
+' "$WF")"
+group_line="$(grep -E '^[[:space:]]+group:' <<<"$conc" || true)"
+group_re="dry_run == 'true' && format\('([^']*)', github\.run_id\) \|\| format\('([^']*)', needs\.plan\.outputs\.tag\)"
+dry_t=""
+real_t=""
+if [[ "$group_line" =~ $group_re ]]; then
+  dry_t="${BASH_REMATCH[1]}"
+  real_t="${BASH_REMATCH[2]}"
+fi
+fill() { # <template with {0}> <value>
+  printf '%s\n' "$1" | sed "s/{0}/$2/"
+}
+check "the release job's concurrency group is keyed on the plan job's dry_run output: a dry run by its run id, a real run by its tag" \
+  $([ -n "$dry_t" ] && [ -n "$real_t" ]; echo $?)
+check "two dry runs never share a group (so one cannot cancel the other)" \
+  $([ -n "$dry_t" ] && [ "$(fill "$dry_t" 101)" != "$(fill "$dry_t" 102)" ]; echo $?)
+check "a real release has one group per tag" \
+  $([ -n "$real_t" ] && [ "$(fill "$real_t" "$TAG")" = "release-$TAG" ] && [ "$(fill "$real_t" "$TAG")" != "$(fill "$real_t" v9.9.9-pdfium9999)" ]; echo $?)
+check "a dry run never shares a group with a real release, whatever the run id or tag" \
+  $([ -n "$dry_t" ] && [ -n "$real_t" ] && [ "$(fill "$dry_t" 101)" != "$(fill "$real_t" "$TAG")" ] && [ "$(fill "$dry_t" "$TAG")" != "$(fill "$real_t" "$TAG")" ]; echo $?)
+check "the release job still never cancels a running release (cancel-in-progress: false)" \
+  $(grep -qE '^[[:space:]]+cancel-in-progress: false[[:space:]]*$' <<<"$conc"; echo $?)
 
 if [ "$failures" -gt 0 ]; then
   echo "release-gate-test: $failures failure(s)"

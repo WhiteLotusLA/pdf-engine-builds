@@ -43,10 +43,11 @@
 #             2 usage, tool missing, malformed tag, or a tag shape that has no build (-stock alone, -macos-only alone),
 #             3 the tag does not match the PDFium pin in versions.env,
 #             6 GitHub's checksums or asset list disagreed with the local files, or the draft could not be read
-#               back (the draft was deleted by its id; nothing was published),
-#             7 the draft could not be created (a partial draft is deleted by its id), the releases for the tag
-#               after create were not exactly one draft (nothing deleted), or the draft could not be published
-#               (left in place for inspection).
+#               back (nothing was published; the draft is deleted by its id, or a warning says why it was not:
+#               GitHub no longer reports it as a draft, or the DELETE failed, and a person must look),
+#             7 the draft could not be created (a partial draft is deleted by its id, or a warning says why not),
+#               the releases for the tag after create could not be listed or were not exactly one draft (nothing
+#               published or deleted), or the draft could not be published (left in place for inspection).
 set -euo pipefail
 
 # shellcheck source=common.sh
