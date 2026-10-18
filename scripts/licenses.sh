@@ -3,9 +3,11 @@
 #   scripts/licenses.sh stage-pdfium <pdfium source dir> <ninja build dir> <stage dir>
 #       Copies the notice of PDFium and of every third_party library that the GN graph names
 #       (build.ninja) or that the pdfium target compiles (ninja -t inputs pdfium) into
-#       <stage dir>/pdfium/. A library this script does not know fails the run, so a new upstream
-#       dependency is reviewed before it ships; so do compiled Skia objects without a Skia notice
-#       and a missing notice of a library every PDFium build links (REQUIRED_PDFIUM_NOTICES).
+#       <stage dir>/pdfium/. A library this script does not know fails the run, after every unknown
+#       name is listed with one example, so a new upstream dependency is reviewed before it ships; so
+#       do compiled Skia objects without a Skia notice, compiler-rt code from the clang package in the
+#       built library (CLANG_RT_RE), and a missing notice of a library every PDFium build links
+#       (REQUIRED_PDFIUM_NOTICES).
 #       ninja is the one PDFium's DEPS installs (<pdfium source dir>/third_party/ninja/ninja),
 #       or NINJA_BIN.
 #   scripts/licenses.sh stage-qpdf <stage dir>
@@ -42,13 +44,77 @@ IGNORED_THIRD_PARTY=" nasm googletest test_fonts libc++ libc++abi "
 # means the detection read the wrong build directory or PDFium's dependencies changed; review the list then.
 REQUIRED_PDFIUM_NOTICES="abseil.txt agg23.txt freetype.txt harfbuzz.txt icu.txt lcms.txt libjpeg_turbo.md libopenjpeg.txt libyuv.txt zlib.txt"
 
+# third_party/llvm-build is the clang package PDFium's DEPS pins: a toolchain, not a library. One file of it is an
+# input of the pdfium target without being linked into it. //build/config/compiler:runtime_library adds
+# //build/config/clang:compiler_builtins to every target, whose libs name compiler-rt's builtins archive
+# (lib/clang/<version>/lib/darwin/libclang_rt.osx.a, .ios.a or .iossim.a by slice). GN writes a lib given as a
+# path as an implicit dependency (after '|') of the link edge, and the Apple toolchain's alink archives only the
+# explicit inputs (rspfile_content = "{{inputs}}" in build/toolchain/apple/toolchain.gni), so libtool never
+# reads the archive; ninja -t inputs lists implicit inputs too. Build run 39094176013 shows it: the libpdfium.a
+# of macos-arm64, ios-arm64 and ios-arm64-simulator holds 1241 objects, none named after a compiler-rt source
+# (os_version_check, udivti3 and the like), defines no external symbol starting with ___ (most builtins'
+# names do) and none of the 289 that Xcode's own libclang_rt.osx.a defines, and leaves ___udivti3 and ___floattidf
+# undefined for the app's toolchain to supply at the app's link. So that one archive needs no notice, but only
+# while nm shows that the library built here defines none of its symbols (compiler_rt_not_linked); any other
+# llvm-build file is unknown.
+CLANG_RT_RE="^'?(\.\./)+third_party/llvm-build/Release[+]Asserts/lib/clang/[0-9]+/lib/darwin/libclang_rt[.](osx|ios|iossim)[.]a'?\$"
+
 copy_notice() { # <library> <source file> <destination file>
   [ -f "$2" ] || die 1 "no notice file for $1: expected $2"
   cp "$2" "$3"
 }
 
-unknown_library() { # <name> <where it was found> <the line> <pdfium source dir>
-  die 1 "unknown third_party library '$1' in the PDFium build ($2: ${3:0:200}): read $4/third_party/$1, then add a case to stage_pdfium (or, for a test or build tool that the $PDFIUM_NINJA_TARGET target does not compile, to IGNORED_THIRD_PARTY) in scripts/licenses.sh"
+# unknown_library <name> <where it was found> <the line>: notes a library this script does not know, once per name
+# with the first line that named it. stage_pdfium fails after it has read every name and lists them all, so one
+# build shows the whole set.
+UNKNOWN_NAMES=$'\n'
+UNKNOWN_REPORT=""
+unknown_library() {
+  case "$UNKNOWN_NAMES" in *$'\n'"$1"$'\n'*) return 0 ;; esac
+  UNKNOWN_NAMES="$UNKNOWN_NAMES$1"$'\n'
+  UNKNOWN_REPORT="${UNKNOWN_REPORT}unknown third_party library '$1' in the PDFium build ($2: ${3:0:200})"$'\n'
+}
+
+# defined_symbols <archive> <anchor symbol or ""> <out file>: writes every external and private external
+# definition of the archive (weak ones too), one name per line, sorted under LC_ALL=C. nm runs on its own, never in
+# a pipe, so its failure stops the run; so do an empty list and a missing anchor, because "no symbol in common"
+# proves nothing unless both lists are real.
+defined_symbols() {
+  local lib="$1" anchor="$2" out="$3"
+  nm -m "$lib" >"$out.nm" 2>"$out.err" || die 1 "nm failed on $lib: $(sed -n 1p "$out.err")"
+  { grep -E ' (private )?external ' "$out.nm" || true; } | { grep -v '(undefined)' || true; } \
+    | awk '{print $NF}' | LC_ALL=C sort -u >"$out"
+  [ -s "$out" ] || die 1 "nm lists no defined symbol in $lib, so it cannot show that compiler-rt is not linked"
+  if [ -n "$anchor" ] && ! grep -qx -- "$anchor" "$out"; then
+    die 1 "$lib does not define $anchor, so it is not the library the $PDFIUM_NINJA_TARGET target builds"
+  fi
+}
+
+# compiler_rt_not_linked <build dir> <archive paths as ninja lists them, one per line>: refuses when the library the
+# pdfium target wrote (obj/libembedpdf.a with the EmbedPDF patches, else obj/libpdfium.a, as pdfium-build.sh picks
+# it) defines any symbol that a listed compiler-rt archive defines.
+compiler_rt_not_linked() {
+  local build="$1" lib="" f rt both
+  for f in "$build/obj/libembedpdf.a" "$build/obj/libpdfium.a"; do
+    if [ -f "$f" ]; then
+      lib="$f"
+      break
+    fi
+  done
+  [ -n "$lib" ] || die 1 "ninja -t inputs $PDFIUM_NINJA_TARGET lists compiler-rt's builtins archive, but $build has no obj/libembedpdf.a or obj/libpdfium.a to show it is not linked: build the $PDFIUM_NINJA_TARGET target (scripts/pdfium-build.sh) before staging"
+  require_cmd nm
+  CRT_TMP="$(mktemp -d "${TMPDIR:-/tmp}/licenses-compiler-rt.XXXXXX")"
+  trap 'rm -rf "$CRT_TMP"' EXIT
+  defined_symbols "$lib" _FPDF_InitLibrary "$CRT_TMP/lib"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rt="$build/$(printf '%s' "$f" | tr -d "'")"
+    [ -f "$rt" ] || die 1 "ninja -t inputs $PDFIUM_NINJA_TARGET lists the compiler-rt archive $f, but the clang package has no such file ($rt)"
+    defined_symbols "$rt" "" "$CRT_TMP/rt"
+    both="$(LC_ALL=C comm -12 "$CRT_TMP/lib" "$CRT_TMP/rt")"
+    [ -z "$both" ] || die 1 "compiler-rt is linked into $lib: it defines $(printf '%s\n' "$both" | wc -l | tr -d ' ') symbol(s) of $f (first: $(printf '%s\n' "$both" | sed -n 1p)), so the release would carry LLVM code (Apache-2.0 WITH LLVM-exception) without its notice: stage the LLVM compiler-rt license in stage_pdfium (scripts/licenses.sh) and require it in scripts/release-publish.sh"
+    log "compiler-rt is not linked: $lib defines none of the $(wc -l <"$CRT_TMP/rt" | tr -d ' ') symbols of $f, so it needs no notice"
+  done <<<"$2"
 }
 
 # third_party_refs <graph|built>: for every "third_party/<name>" on the lines read from stdin, prints
@@ -77,7 +143,7 @@ third_party_refs() {
 }
 
 stage_pdfium() { # <pdfium source dir> <ninja build dir> <stage dir>
-  local src="$1" build="$2" out="$3/pdfium" ninja inputs refs built_names origin lib line where f
+  local src="$1" build="$2" out="$3/pdfium" ninja inputs refs built_names origin lib line where f clang_rts=""
   local us=$'\037' name_re='^[a-z0-9_-]+$'
   [ -d "$src" ] || die 2 "PDFium source directory not found: $src"
   [ -f "$build/build.ninja" ] || die 2 "build.ninja not found in $build"
@@ -128,7 +194,10 @@ stage_pdfium() { # <pdfium source dir> <ninja build dir> <stage dir>
         *" $lib "*) die 1 "'$lib' is on IGNORED_THIRD_PARTY, but the $PDFIUM_NINJA_TARGET target compiles it ($where: ${line:0:200}), so it needs a notice: add a case to stage_pdfium in scripts/licenses.sh" ;;
       esac
     fi
-    [[ "$lib" =~ $name_re ]] || unknown_library "$lib" "$where" "$line" "$src"
+    if ! [[ "$lib" =~ $name_re ]]; then
+      unknown_library "$lib" "$where" "$line"
+      continue
+    fi
     case "$lib" in
       abseil | abseil-cpp) copy_notice "$lib" "$src/third_party/abseil-cpp/LICENSE" "$out/abseil.txt" ;;
       agg23 | fx_agg)
@@ -168,6 +237,18 @@ stage_pdfium() { # <pdfium source dir> <ninja build dir> <stage dir>
       libunwind) copy_notice "$lib" "$src/third_party/libunwind/src/LICENSE.TXT" "$out/libunwind.txt" ;;
       # BSD-3-Clause. pdfium.gni sets pdf_use_libyuv = true; core/fxge and core/fxcodec link it.
       libyuv) copy_notice "$lib" "$src/third_party/libyuv/LICENSE" "$out/libyuv.txt" ;;
+      # The clang package: only compiler-rt's builtins archive (CLANG_RT_RE), an input of the pdfium target that
+      # is not linked into it. Every input path naming llvm-build is checked here (the loop sees one line per name);
+      # compiler_rt_not_linked proves the "not linked" after the loop. No GN target lives under llvm-build, so
+      # build.ninja naming it is unknown.
+      llvm-build)
+        f="$(printf '%s\n' "$refs" | { grep "^built$us$lib$us" || true; } | cut -d "$us" -f 3- | { grep -Ev "$CLANG_RT_RE" || true; } | sed -n 1p)"
+        if [ "$origin" = built ] && [ -z "$f" ]; then
+          clang_rts="$(printf '%s\n' "$refs" | { grep "^built$us$lib$us" || true; } | cut -d "$us" -f 3- | LC_ALL=C sort -u)"
+        else
+          unknown_library "$lib" "$where" "${f:-$line}"
+        fi
+        ;;
       llvm-libc) copy_notice "$lib" "$src/third_party/llvm-libc/src/LICENSE.TXT" "$out/llvm-libc.txt" ;;
       simdutf) copy_notice "$lib" "$src/third_party/simdutf/LICENSE" "$out/simdutf.txt" ;;
       # BSD-3-Clause. Seen through ninja -t inputs: //skia:redaction_pathops compiles Skia's path code.
@@ -176,9 +257,17 @@ stage_pdfium() { # <pdfium source dir> <ninja build dir> <stage dir>
         [ -f "$src/third_party/zlib/zlib.h" ] || die 1 "no notice file for $lib: expected $src/third_party/zlib/zlib.h"
         sed -n '/^\/\* zlib.h/,/\*\//p' "$src/third_party/zlib/zlib.h" >"$out/zlib.txt"
         ;;
-      *) unknown_library "$lib" "$where" "$line" "$src" ;;
+      *) unknown_library "$lib" "$where" "$line" ;;
     esac
   done <<<"$(printf '%s\n' "$refs" | sort -t "$us" -k1,1 -k2,2 -u)"
+
+  if [ -n "$UNKNOWN_REPORT" ]; then
+    printf '%s' "$UNKNOWN_REPORT" | awk -v name="$SCRIPT_NAME" '{ print name ": error: " $0 }' >&2
+    die 1 "the PDFium build uses $(printf '%s' "$UNKNOWN_REPORT" | grep -c .) third_party name(s) that scripts/licenses.sh does not know (each listed above with one example): for each, read $src/third_party/<name>, then add a case to stage_pdfium (or, for a test or build tool that the $PDFIUM_NINJA_TARGET target does not compile, to IGNORED_THIRD_PARTY) in scripts/licenses.sh"
+  fi
+  if [ -n "$clang_rts" ]; then
+    compiler_rt_not_linked "$build" "$clang_rts"
+  fi
 
   # Skia objects in the build directory mean Skia code went into the library, whatever found it.
   if [ -d "$build/obj/skia" ] && [ ! -s "$out/skia.txt" ]; then

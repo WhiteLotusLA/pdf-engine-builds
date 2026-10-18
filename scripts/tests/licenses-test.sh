@@ -10,8 +10,13 @@
 #     of their own (dragonbox, fast_float), and the rest; the copies hold the notice text
 #   - a test library that is only in the graph (googletest, test_fonts) is not staged, but fails the run when
 #     the pdfium target compiles it
+#   - compiler-rt's builtins archive from the clang package (third_party/llvm-build), which ninja lists as an
+#     input of pdfium, stages no notice while nm shows the built library defines none of its symbols (all three
+#     slices' archive names); a library that does define one, a missing library or archive, or a library
+#     without _FPDF_InitLibrary fails the run; any other llvm-build file counts as unknown
 #   - an unknown library fails the run and is named, whether build.ninja names it or the pdfium target compiles
-#     it under a label outside //third_party; an empty or uppercase name counts as unknown
+#     it under a label outside //third_party; an empty or uppercase name counts as unknown; two unknown names
+#     are both reported, each with an example, before the run fails
 #   - a build graph with no library, an empty build.ninja, a missing ninja, compiled Skia objects without a
 #     Skia notice, a missing always-linked notice, or a missing notice file fail the run
 #   - assemble writes README.txt, the notices and a zip, merges PDFium stage dirs with different library
@@ -303,13 +308,35 @@ build obj/third_party/libyuv/libyuv_internal.a: alink obj/third_party/libyuv/lib
 target_file obj/third_party/test_fonts/test_fonts.ninja "build test_fonts/NotoSans-Regular.ttf: copy ../../third_party/test_fonts/test_fonts/NotoSans-Regular.ttf"
 target_file obj/third_party/zlib/chrome_zlib.ninja "build obj/third_party/zlib/chrome_zlib/adler32.o: cc ../../third_party/zlib/adler32.c
 build obj/third_party/zlib/libchrome_zlib.a: alink obj/third_party/zlib/chrome_zlib/adler32.o"
-# //:pdfium, a complete static library: its own objects, every source_set object and every static library.
-PDFIUM_LINK="build obj/libembedpdf.a: alink obj/core/fxcrt/fxcrt/fx_extension.o obj/third_party/fx_agg/agg_curves.o obj/third_party/fx_freetype/ftbase.o obj/third_party/fx_lcms2/cmscnvrt.o obj/third_party/fx_libopenjpeg/openjpeg.o obj/third_party/abseil-cpp/absl/base/base/raw_logging.o obj/skia/libredaction_pathops.a obj/third_party/harfbuzz/libharfbuzz.a obj/third_party/icu/libicuuc.a obj/third_party/libjpeg_turbo/libjpeg.a obj/third_party/libpng/libpng.a obj/third_party/libyuv/libyuv_internal.a obj/third_party/zlib/libchrome_zlib.a || icudtl.dat"
+# //:pdfium, a complete static library: its own objects, every source_set object and every static library as
+# explicit inputs (the archive's members), and the libs of its configs as implicit ones (|):
+# //build/config/clang:compiler_builtins names compiler-rt's builtins archive from the clang package, which build
+# run 39094176013 shows as an input of pdfium but whose code none of the three slices carries.
+CLANG_RT="../../third_party/llvm-build/Release+Asserts/lib/clang/24/lib/darwin/libclang_rt.osx.a"
+PDFIUM_LINK="build obj/libembedpdf.a: alink obj/core/fxcrt/fxcrt/fx_extension.o obj/third_party/fx_agg/agg_curves.o obj/third_party/fx_freetype/ftbase.o obj/third_party/fx_lcms2/cmscnvrt.o obj/third_party/fx_libopenjpeg/openjpeg.o obj/third_party/abseil-cpp/absl/base/base/raw_logging.o obj/skia/libredaction_pathops.a obj/third_party/harfbuzz/libharfbuzz.a obj/third_party/icu/libicuuc.a obj/third_party/libjpeg_turbo/libjpeg.a obj/third_party/libpng/libpng.a obj/third_party/libyuv/libyuv_internal.a obj/third_party/zlib/libchrome_zlib.a | $CLANG_RT || icudtl.dat"
 target_file obj/pdfium.ninja "$PDFIUM_LINK"
 # A test executable: it links googletest and copies the test fonts; the pdfium target does neither.
 target_file obj/pdfium_unittests.ninja "build ./pdfium_unittests: link obj/libembedpdf.a obj/third_party/googletest/libgtest.a || test_fonts/NotoSans-Regular.ttf"
 # What the compile steps would leave behind.
 mkdir -p "$BUILD/obj/skia/redaction_pathops" "$BUILD/obj/third_party/zlib/chrome_zlib"
+
+# The archives nm reads: compiler-rt's builtins in the clang package, and the library the pdfium target writes,
+# which defines FPDF_InitLibrary and calls a builtin it leaves undefined (as the real slices leave ___udivti3).
+tiny_archive() { # <archive> <C source>
+  local dir
+  dir="$(mktemp -d "$WORK/tiny-archive.XXXXXX")"
+  printf '%s\n' "$2" >"$dir/x.c"
+  xcrun --sdk macosx clang -c -O0 -arch arm64 "$dir/x.c" -o "$dir/x.o"
+  mkdir -p "$(dirname "$1")"
+  rm -f "$1"
+  xcrun libtool -static -o "$1" "$dir/x.o"
+}
+RT_DIR="$SRC/third_party/llvm-build/Release+Asserts/lib/clang/24/lib/darwin"
+tiny_archive "$RT_DIR/libclang_rt.osx.a" 'long long rt_udivti3(long long a, long long b) { return a / b; }
+int rt_os_version_at_least(int v) { return v > 26; }'
+LIB_CALLS_RT='long long rt_udivti3(long long a, long long b);
+int FPDF_InitLibrary(void) { return (int)rt_udivti3(6, 3); }'
+tiny_archive "$BUILD/obj/libembedpdf.a" "$LIB_CALLS_RT"
 
 # variant <name>: a copy of the build directory beside it, for a test that changes it.
 variant() {
@@ -334,6 +361,59 @@ check "copied notices equal their sources (abseil, freetype, harfbuzz, icu, libj
 check "notices cut from source headers hold the notice and nothing after it (agg23, lcms, libopenjpeg, zlib)" $(grep -q "Maxim Shemanarev" "$S/agg23.txt" && ! grep -q "#ifndef" "$S/agg23.txt" && grep -q "Marti Maria Saguer" "$S/lcms.txt" && ! grep -q "#ifndef" "$S/lcms.txt" && grep -q "2-clauses" "$S/libopenjpeg.txt" && ! grep -q "#include" "$S/libopenjpeg.txt" && grep -q "Jean-loup Gailly" "$S/zlib.txt" && ! grep -q "#define" "$S/zlib.txt"; echo $?)
 check "an ignored test library (googletest) is not staged" $([ -z "$(find "$S" -iname '*googletest*')" ]; echo $?)
 check "the test fonts are not staged" $([ -z "$(find "$S" -iname '*test_fonts*')" ]; echo $?)
+check "the compiler-rt archive (an input of pdfium) stages no notice once nm shows the library defines none of its symbols" \
+  $(grep -q "defines none of the 2 symbols of $CLANG_RT" <<<"$out"; echo $?)
+
+# --- compiler-rt's builtins archive (third_party/llvm-build): an input of pdfium, never linked into it ---
+V="$(variant llvm-merged)"
+tiny_archive "$V/obj/libembedpdf.a" 'long long rt_udivti3(long long a, long long b) { return a / b; }
+int FPDF_InitLibrary(void) { return (int)rt_udivti3(6, 3); }'
+expect_exit "a library that defines a symbol of the compiler-rt archive fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names the symbol, the archive and the missing LLVM notice" \
+  $(grep -q "_rt_udivti3" <<<"$out" && grep -q "libclang_rt.osx.a" <<<"$out" && grep -q "LLVM" <<<"$out"; echo $?)
+
+V="$(variant llvm-no-library)"
+rm -f "$V/obj/libembedpdf.a"
+expect_exit "no built library to check compiler-rt against fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names the library it expected" $(grep -q "obj/libembedpdf.a or obj/libpdfium.a" <<<"$out"; echo $?)
+
+V="$(variant llvm-libpdfium)"
+mv "$V/obj/libembedpdf.a" "$V/obj/libpdfium.a"
+expect_exit "the stock library name (obj/libpdfium.a) is checked as well" 0 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+
+V="$(variant llvm-no-anchor)"
+tiny_archive "$V/obj/libembedpdf.a" 'int something_else(void) { return 1; }'
+expect_exit "a library that does not define _FPDF_InitLibrary fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names _FPDF_InitLibrary" $(grep -q "_FPDF_InitLibrary" <<<"$out"; echo $?)
+
+V="$(variant llvm-no-archive)"
+printf '%s\n' "${PDFIUM_LINK/libclang_rt.osx.a/libclang_rt.ios.a}" >"$V/obj/pdfium.ninja"
+expect_exit "a compiler-rt archive that ninja lists but the clang package lacks fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names the archive" $(grep -q "libclang_rt.ios.a" <<<"$out"; echo $?)
+
+for rt in ios iossim; do
+  cp "$RT_DIR/libclang_rt.osx.a" "$RT_DIR/libclang_rt.$rt.a"
+  V="$(variant "llvm-$rt")"
+  printf '%s\n' "${PDFIUM_LINK/libclang_rt.osx.a/libclang_rt.$rt.a}" >"$V/obj/pdfium.ninja"
+  expect_exit "the $rt slice's builtins archive (libclang_rt.$rt.a) stages no notice" 0 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage-$rt"
+  check "the $rt slice stages the same notices as the macOS one" \
+    $([ "$(cd "$WORK/stage-$rt/pdfium" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "$(cd "$S" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" ]; echo $?)
+done
+
+V="$(variant llvm-other)"
+printf '%s\n' "${PDFIUM_LINK/ || / ../../third_party/llvm-build/Release+Asserts/lib/libLLVMSupport.a || }" >"$V/obj/pdfium.ninja"
+expect_exit "an llvm-build file other than compiler-rt's builtins archive fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names llvm-build and that file" $(grep -q "unknown third_party library 'llvm-build'.*libLLVMSupport.a" <<<"$out"; echo $?)
+
+V="$(variant llvm-profile)"
+printf '%s\n' "${PDFIUM_LINK/ || / ../../third_party/llvm-build/Release+Asserts/lib/clang/24/lib/darwin/libclang_rt.profile_osx.a || }" >"$V/obj/pdfium.ninja"
+expect_exit "a compiler-rt archive other than the builtins (the profile runtime) fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names that archive" $(grep -q "unknown third_party library 'llvm-build'.*libclang_rt.profile_osx.a" <<<"$out"; echo $?)
+
+V="$(variant llvm-graph)"
+printf 'build third_party/llvm-build$:something: phony obj/w\n' >>"$V/build.ninja"
+expect_exit "build.ninja naming llvm-build (no GN target lives there) fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure quotes the build.ninja line" $(grep -q "unknown third_party library 'llvm-build'.*build third_party/llvm-build" <<<"$out"; echo $?)
 
 # --- unknown or odd names fail the run and are named ---
 V="$(variant unknown-graph)"
@@ -346,6 +426,15 @@ printf 'build obj/core/fxcrt/fxcrt/mystery.o: cxx ../../third_party/mystery_vend
 printf '%s\n' "${PDFIUM_LINK/ || / obj/core/fxcrt/fxcrt/mystery.o || }" >"$V/obj/pdfium.ninja"
 expect_exit "an unknown library compiled by a target outside //third_party fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
 check "the failure names the library and says the pdfium target compiles it" $(grep -q "unknown third_party library 'mystery_vendored'" <<<"$out" && grep -q "ninja -t inputs pdfium" <<<"$out"; echo $?)
+
+V="$(variant two-unknowns)"
+printf 'build third_party/mystery_lib$:mystery: phony phony/third_party/mystery_lib/mystery\n' >>"$V/build.ninja"
+printf 'build obj/core/fxcrt/fxcrt/mystery.o: cxx ../../third_party/mystery_vendored/mystery.cc\n' >>"$V/obj/core/fxcrt/fxcrt.ninja"
+printf '%s\n' "${PDFIUM_LINK/ || / obj/core/fxcrt/fxcrt/mystery.o || }" >"$V/obj/pdfium.ninja"
+expect_exit "two unknown libraries fail the run (exit 1)" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names both unknown libraries, each with an example (not only the first)" \
+  $(grep -q "unknown third_party library 'mystery_vendored'.*third_party/mystery_vendored/mystery.cc" <<<"$out" && grep -q "unknown third_party library 'mystery_lib'.*build third_party/mystery_lib" <<<"$out"; echo $?)
+check "the failure counts them" $(grep -qF "2 third_party name(s) that scripts/licenses.sh does not know" <<<"$out"; echo $?)
 
 V="$(variant uppercase)"
 printf 'build third_party/Skia2: phony obj/x\n' >>"$V/build.ninja"
