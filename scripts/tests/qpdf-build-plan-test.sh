@@ -27,6 +27,28 @@ dry() { # <slice> [env assignments...] -> prints the plan
   env QB_DRY_RUN=1 WORK_DIR="$WORK/dry-work" OUT_DIR="$WORK/dry-out" "$@" "$REPO/scripts/qpdf-build.sh" "$slice"
 }
 
+line_of() { # <fixed string>... -> the number of the first line of $plan holding them all, 0 when none does
+  local n=0 line all s
+  while IFS= read -r line; do
+    n=$((n + 1))
+    all=1
+    for s in "$@"; do grep -qF -- "$s" <<<"$line" || { all=0; break; }; done
+    if [ "$all" -eq 1 ]; then echo "$n"; return 0; fi
+  done <<<"$plan"
+  echo 0
+}
+plan_line() { # <line number> -> that line of $plan; fails for 0
+  [ "$1" -gt 0 ] && sed -n "$1p" <<<"$plan"
+}
+jpeg_opts_in() { # <line number>... -> true when every one of those plan lines has all the libjpeg-turbo options
+  local l t
+  for l in "$@"; do
+    t="$(plan_line "$l")" || return 1
+    has "$t" "-DENABLE_SHARED=0" && has "$t" "-DENABLE_STATIC=1" && has "$t" "-DWITH_SIMD=0" \
+      && has "$t" "-DWITH_TURBOJPEG=0" && has "$t" "-DWITH_TOOLS=0" && has "$t" "-DWITH_TESTS=0" || return 1
+  done
+}
+
 for slice in macos-arm64 ios-arm64 iossim-arm64; do
   plan="$(dry "$slice")"
   check "$slice: static only" $(has "$plan" "-DBUILD_SHARED_LIBS=OFF" && has "$plan" "-DBUILD_STATIC_LIBS=ON"; echo $?)
@@ -39,7 +61,40 @@ for slice in macos-arm64 ios-arm64 iossim-arm64; do
   guard_line="$(grep -n 'qpdf-config-guard.sh' <<<"$plan" | head -1 | cut -d: -f1)"
   build_line="$(grep -n -- '--target libqpdf' <<<"$plan" | head -1 | cut -d: -f1)"
   check "$slice: the config guard runs before the qpdf build" $([ -n "$guard_line" ] && [ -n "$build_line" ] && [ "$guard_line" -lt "$build_line" ]; echo $?)
+
+  # qpdf's libjpeg-turbo copy gets every external name prefixed (qpdfjt_), or an app linking PDFium too
+  # fails on duplicate symbols (_jpeg_natural_order in run 39083399705). Pass 1 builds libjpeg-turbo as
+  # is, the header is made from that archive, pass 2 and qpdf are compiled with it force-included, and
+  # the merged archive is checked.
+  build="$WORK/dry-work/build/$slice"
+  hdr="$build/qpdfjt-prefix.h"
+  c_flag="$(printf '%q' "-DCMAKE_C_FLAGS=-include $hdr")"
+  cxx_flag="$(printf '%q' "-DCMAKE_CXX_FLAGS=-include $hdr")"
+  names_cfg="$(line_of "cmake -S" "-B $build/jpeg-names " "-DCMAKE_INSTALL_PREFIX=$build/jpeg-names-prefix")"
+  names_install="$(line_of "cmake --install $build/jpeg-names")"
+  header_gen="$(line_of "qpdf-jpeg-prefix.sh header $build/jpeg-names-prefix/lib/libjpeg.a $hdr")"
+  jpeg_cfg="$(line_of "cmake -S" "-B $build/jpeg " "$c_flag")"
+  qpdf_cfg="$(line_of "cmake -S" "-DLIBJPEG_LIB_PATH=$build/prefix/lib/libjpeg.a" "$c_flag" "$cxx_flag")"
+  merge="$(line_of "libtool -static")"
+  copy_headers="$(line_of "sh -c cp" "$WORK/dry-out/qpdf/$slice/Headers/qpdf")"
+  prefix_check="$(line_of "qpdf-jpeg-prefix.sh check $WORK/dry-out/qpdf/$slice/libqpdf.a $build/prefix/lib/libjpeg.a $hdr $WORK/dry-out/qpdf/$slice/Headers")"
+  check "$slice: libjpeg-turbo is first built as is, in its own tree and prefix, to learn its names" $([ "$names_cfg" -gt 0 ] && [ "$names_install" -gt "$names_cfg" ] && lacks "$(plan_line "$names_cfg")" "-include"; echo $?)
+  check "$slice: the prefix header is made from that first archive" $([ "$names_install" -gt 0 ] && [ "$header_gen" -gt "$names_install" ]; echo $?)
+  check "$slice: libjpeg-turbo is then rebuilt with the header force-included" $([ "$header_gen" -gt 0 ] && [ "$jpeg_cfg" -gt "$header_gen" ]; echo $?)
+  check "$slice: both libjpeg-turbo builds use the same options" $(jpeg_opts_in "$names_cfg" "$jpeg_cfg"; echo $?)
+  check "$slice: qpdf is compiled (C and C++) with the same header, against the rebuilt libjpeg" $([ "$qpdf_cfg" -gt "$jpeg_cfg" ]; echo $?)
+  check "$slice: the prefix check runs on the merged archive and the shipped headers" $([ "$merge" -gt 0 ] && [ "$copy_headers" -gt "$merge" ] && [ "$prefix_check" -gt "$copy_headers" ]; echo $?)
 done
+
+# The prefix header is force-included by path, so its path must be absolute and free of blanks.
+set +e
+out="$(QB_DRY_RUN=1 WORK_DIR="$WORK/with space" OUT_DIR="$WORK/dry-out" "$REPO/scripts/qpdf-build.sh" macos-arm64 2>&1)"; code=$?
+set -e
+check "a work dir with a blank exits 2 before anything is built" $([ "$code" -eq 2 ] && has "$out" "blank" && lacks "$out" "cmake"; echo $?)
+set +e
+out="$(QB_DRY_RUN=1 WORK_DIR="relative-work" OUT_DIR="$WORK/dry-out" "$REPO/scripts/qpdf-build.sh" macos-arm64 2>&1)"; code=$?
+set -e
+check "a relative work dir exits 2 before anything is built" $([ "$code" -eq 2 ] && has "$out" "absolute" && lacks "$out" "cmake"; echo $?)
 
 plan="$(dry macos-arm64)"
 check "macos: native build, no CMAKE_SYSTEM_NAME" $(has "$plan" "-DCMAKE_OSX_SYSROOT=macosx" && lacks "$plan" "-DCMAKE_SYSTEM_NAME"; echo $?)

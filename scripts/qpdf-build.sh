@@ -3,7 +3,8 @@
 #   slice: macos-arm64 | ios-arm64 | iossim-arm64
 #
 # Builds libjpeg-turbo (static), then qpdf (static, native crypto only) for one slice, and merges
-# both into one archive.
+# both into one archive. Every external name of this libjpeg-turbo copy carries the prefix qpdfjt_
+# (scripts/qpdf-jpeg-prefix.sh), so an app can link PDFium, which has its own libjpeg, next to it.
 # Result: out/qpdf/<slice>/libqpdf.a and out/qpdf/<slice>/Headers/qpdf/*.h and *.hh
 #
 # Inputs: versions.env (QPDF_VERSION, LIBJPEG_TURBO_VERSION, MACOS_MIN, IOS_MIN) and sources.sha256
@@ -20,8 +21,11 @@
 #                                crypto providers, pkg-config not isolated) so tests can show the
 #                                guard catches a runner that has GnuTLS or OpenSSL installed.
 # Exit codes: 0 ok, 1 a cmake, gh, tar or libtool command failed (set -e passes its failure on),
-#             2 usage or missing tool or pin, 3 checksum mismatch, 4 crypto guard failed,
-#             5 build output missing or built for the wrong platform.
+#             2 usage or missing tool or pin, or a WORK_DIR that is relative or has a blank,
+#             3 checksum mismatch, 4 crypto guard failed,
+#             5 build output missing or built for the wrong platform,
+#             6 the libjpeg-turbo prefix header could not be made, or the merged archive still defines
+#               or references a libjpeg name without the prefix.
 set -euo pipefail
 
 # shellcheck source=common.sh
@@ -126,6 +130,17 @@ if [ "$DRY" != "1" ]; then
   fi
 fi
 
+# The prefix header is force-included by path through CMAKE_C_FLAGS and CMAKE_CXX_FLAGS, which CMake
+# splits at blanks and the compiler reads relative to each build directory.
+JPEG_PREFIX_H="$BUILD/qpdfjt-prefix.h"
+case "$JPEG_PREFIX_H" in
+  /*) ;;
+  *) die 2 "WORK_DIR must be an absolute path (the libjpeg-turbo prefix header is included by path): $WORK_DIR" ;;
+esac
+case "$JPEG_PREFIX_H" in
+  *[[:space:]]*) die 2 "WORK_DIR must not contain a blank (the libjpeg-turbo prefix header is included by path): $WORK_DIR" ;;
+esac
+
 # Flags shared by both CMake projects. The macOS slice is a native build; the iOS slices are
 # cross builds. CMAKE_TRY_COMPILE_TARGET_TYPE keeps configure checks from linking executables,
 # which would need code signing on iOS.
@@ -161,16 +176,35 @@ else
 fi
 
 # --- libjpeg-turbo: static, no SIMD (qpdf only uses it for the optional DCT filter), no tools ---
-run rm -rf "$BUILD/jpeg" "$BUILD/qpdf" "$PREFIX"
+# PDFium carries Chromium's libjpeg_turbo, which renames its functions but not every table, so a plain copy
+# here collides with it (both defined _jpeg_natural_order in run 39083399705, and an app linking both
+# engines failed with a duplicate symbol). Every external name of this copy is therefore prefixed, not only
+# the one that collides today: pass 1 builds libjpeg-turbo as is in its own tree to learn its names, the
+# header maps each to qpdfjt_<name>, and pass 2 (the copy that ships) is built with that header
+# force-included. WITH_SIMD=0 means there is no assembly the preprocessor could not rename.
+jpeg_opts=(-DENABLE_SHARED=0 -DENABLE_STATIC=1 -DWITH_SIMD=0 -DWITH_TURBOJPEG=0 -DWITH_TOOLS=0 -DWITH_TESTS=0)
+run rm -rf "$BUILD/jpeg-names" "$BUILD/jpeg-names-prefix" "$BUILD/jpeg" "$BUILD/qpdf" "$PREFIX" "$JPEG_PREFIX_H"
 run mkdir -p "$PREFIX"
+run cmake -S "$JPEG_SRC" -B "$BUILD/jpeg-names" "${common[@]}" ${system[@]+"${system[@]}"} \
+  -DCMAKE_INSTALL_PREFIX="$BUILD/jpeg-names-prefix" -DCMAKE_INSTALL_LIBDIR=lib "${jpeg_opts[@]}"
+run cmake --build "$BUILD/jpeg-names" --parallel
+run cmake --install "$BUILD/jpeg-names"
+if [ "$DRY" = "1" ]; then
+  echo "+ $HERE/qpdf-jpeg-prefix.sh header $BUILD/jpeg-names-prefix/lib/libjpeg.a $JPEG_PREFIX_H"
+else
+  "$HERE/qpdf-jpeg-prefix.sh" header "$BUILD/jpeg-names-prefix/lib/libjpeg.a" "$JPEG_PREFIX_H" \
+    || die 6 "could not make the libjpeg-turbo prefix header (see above)"
+fi
 run cmake -S "$JPEG_SRC" -B "$BUILD/jpeg" "${common[@]}" ${system[@]+"${system[@]}"} \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DENABLE_SHARED=0 -DENABLE_STATIC=1 -DWITH_SIMD=0 -DWITH_TURBOJPEG=0 -DWITH_TOOLS=0 -DWITH_TESTS=0
+  -DCMAKE_C_FLAGS="-include $JPEG_PREFIX_H" \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib "${jpeg_opts[@]}"
 run cmake --build "$BUILD/jpeg" --parallel
 run cmake --install "$BUILD/jpeg"
 
 # --- qpdf: static library only; zlib comes from the SDK; libjpeg-turbo from the step above ---
+# qpdf is compiled with the same header, so its calls into libjpeg-turbo bind to the prefixed names.
 run cmake -S "$QPDF_SRC" -B "$BUILD/qpdf" "${common[@]}" ${system[@]+"${system[@]}"} "${crypto[@]}" \
+  -DCMAKE_C_FLAGS="-include $JPEG_PREFIX_H" -DCMAKE_CXX_FLAGS="-include $JPEG_PREFIX_H" \
   -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON \
   -DZLIB_H_PATH="$SDK_PATH/usr/include" -DZLIB_LIB_PATH="$SDK_PATH/usr/lib/libz.tbd" \
   -DLIBJPEG_H_PATH="$PREFIX/include" -DLIBJPEG_LIB_PATH="$PREFIX/lib/libjpeg.a" \
@@ -215,9 +249,14 @@ check_platform() { # <archive> <platform name> <minimum OS version>
 if [ "$DRY" = "1" ]; then
   echo "+ check_platform $OUT/libqpdf.a $WANT_PLATFORM $DEPLOY"
   echo "+ $HERE/check-no-tls-symbols.sh --require-native $OUT/libqpdf.a"
+  echo "+ $HERE/qpdf-jpeg-prefix.sh check $OUT/libqpdf.a $PREFIX/lib/libjpeg.a $JPEG_PREFIX_H $OUT/Headers"
   exit 0
 fi
 
 check_platform "$OUT/libqpdf.a" "$WANT_PLATFORM" "$DEPLOY"
 "$HERE/check-no-tls-symbols.sh" --require-native "$OUT/libqpdf.a" || die 4 "TLS symbols found or native crypto missing in the built archive"
+# Fail closed: no libjpeg name without the prefix may be defined or referenced in the merged archive, every
+# libjpeg member's external definitions carry it, and the shipped headers use none of the renamed names.
+"$HERE/qpdf-jpeg-prefix.sh" check "$OUT/libqpdf.a" "$PREFIX/lib/libjpeg.a" "$JPEG_PREFIX_H" "$OUT/Headers" \
+  || die 6 "the libjpeg-turbo copy in libqpdf.a is not fully prefixed (see above); an app linking PDFium next to it would hit duplicate or crossed jpeg symbols"
 log "$SLICE ok ($(stat -f %z "$OUT/libqpdf.a") bytes, $WANT_PLATFORM minos $DEPLOY)"

@@ -92,6 +92,15 @@ The libraries are static, so nothing is embedded in an app: the app target links
 libjpeg-turbo merged in, zlib taken from the SDK (`-lz`) and qpdf's headers under `Headers/qpdf/`. There is
 no module map: only the C++ shim in the app repo includes these headers.
 
+Every external name of that libjpeg-turbo copy carries the prefix `qpdfjt_` (`jpeg_std_error` is
+`qpdfjt_jpeg_std_error` in the archive). PDFium has its own libjpeg, and a plain copy collides with it in an
+app that links both (CI run 39083399705: both defined `_jpeg_natural_order`, and the link failed with a
+duplicate symbol). `scripts/qpdf-build.sh` builds libjpeg-turbo once as is to list its names,
+`scripts/qpdf-jpeg-prefix.sh header` turns them into `#define` lines, libjpeg-turbo and qpdf are compiled
+with that header force-included, and `scripts/qpdf-jpeg-prefix.sh check` stops the build if the merged
+archive still defines or references a libjpeg name without the prefix. Code that calls libjpeg itself
+needs its own libjpeg, not this copy.
+
 qpdf is built with native crypto only. `USE_IMPLICIT_CRYPTO=OFF` and `REQUIRE_CRYPTO_NATIVE=ON` keep GnuTLS
 (LGPL) and OpenSSL out even when the build machine has them; `scripts/qpdf-config-guard.sh` checks the
 generated `qpdf-config.h` right after configure and `scripts/check-no-tls-symbols.sh` scans every finished
