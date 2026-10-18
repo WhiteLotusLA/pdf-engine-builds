@@ -360,6 +360,25 @@ rm "$BAD/QPDF.xcframework.zip"
 publish "$BAD" "$TAG"
 check "a missing asset aborts the release" $([ "$code" -eq 1 ] && no_create; echo $?)
 
+# the exact asset set, past the checksum check: every line of checksums.txt verifies, but the set is wrong
+BAD="$WORK/set-no-licenses"
+full_dist "$BAD"
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip
+publish "$BAD" "$TAG"
+check "a checksums.txt that omits LICENSES.zip aborts the release (exit 1, names both sets)" \
+  $([ "$code" -eq 1 ] && grep -q "checksums.txt lists 'PDFium.xcframework.zip QPDF.xcframework.zip' but this release must contain exactly 'LICENSES.zip PDFium.xcframework.zip QPDF.xcframework.zip'" <<<"$out" && no_create; echo $?)
+BAD="$WORK/set-extra-listed"
+full_dist "$BAD"
+printf 'extra' >"$BAD/extra.zip"
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip extra.zip
+publish "$BAD" "$TAG"
+check "an extra zip, listed in checksums.txt and present, aborts the release (exit 1)" \
+  $([ "$code" -eq 1 ] && grep -q "checksums.txt lists 'LICENSES.zip PDFium.xcframework.zip QPDF.xcframework.zip extra.zip' but" <<<"$out" && no_create; echo $?)
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+publish "$BAD" "$TAG"
+check "an extra zip that checksums.txt does not list aborts the release (exit 1)" \
+  $([ "$code" -eq 1 ] && grep -q "zip files in .* are 'LICENSES.zip PDFium.xcframework.zip QPDF.xcframework.zip extra.zip' but" <<<"$out" && no_create; echo $?)
+
 # a framework zip without the module map
 BAD="$WORK/no-modulemap"
 full_dist "$BAD"
@@ -477,6 +496,15 @@ FAKE_WRONG_DIGEST=QPDF.xcframework.zip publish "$FULL" "$TAG"
 check "a server-side checksum mismatch exits 6 and names the asset" $([ "$code" -eq 6 ] && grep -q "for QPDF.xcframework.zip but the local file" <<<"$out"; echo $?)
 check "the draft release is deleted by its id and never published" \
   $(deleted_by_id 1 && no_patch && no_by_tag && [ "$(releases 'length')" = 0 ] && grep -q "deleted the draft release 1" <<<"$out"; echo $?)
+
+# GitHub has no digest for an asset (null): that is a mismatch, never a pass
+FAKE_NULL_DIGEST=LICENSES.zip publish "$FULL" "$TAG"
+check "a null digest on the draft exits 6, deletes the draft by its id and never publishes" \
+  $([ "$code" -eq 6 ] && grep -q "GitHub reports '...' for LICENSES.zip" <<<"$out" && deleted_by_id 1 && no_patch; echo $?)
+# the draft holds an asset that was not uploaded
+FAKE_EXTRA_ASSET=1 publish "$FULL" "$TAG"
+check "an extra asset on the draft exits 6, deletes the draft by its id and never publishes" \
+  $([ "$code" -eq 6 ] && grep -q "the draft release holds 5 assets but 4 were uploaded" <<<"$out" && deleted_by_id 1 && no_patch; echo $?)
 
 # creating the draft fails half way: the partial draft (found by the tag, none existed before) is deleted by id
 FAKE_CREATE_FAIL=1 publish "$FULL" "$TAG"
