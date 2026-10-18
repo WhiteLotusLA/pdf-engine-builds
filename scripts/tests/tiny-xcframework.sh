@@ -12,7 +12,10 @@
 tiny_lib() { # <kind> -> prints the path of $WORK/tiny/<kind>/libtiny.a, building it on first use
   # With TINY_SYMBOL set, the library defines that function instead of qb_tiny and lives in
   # $WORK/tiny/<kind>-<symbol>/ (the release gate's test gives PDFium and QPDF different symbols).
-  local kind="$1" sym="${TINY_SYMBOL:-qb_tiny}" sdk target dir="$WORK/tiny/$1${TINY_SYMBOL:+-$TINY_SYMBOL}"
+  # With TINY_EXTRA set, it also defines that function (the release gate requires an anchor symbol
+  # per engine, such as FPDF_InitLibrary or qpdf_init) and lives in $WORK/tiny/<kind>[-<symbol>]-<extra>/.
+  local kind="$1" sym="${TINY_SYMBOL:-qb_tiny}" extra="${TINY_EXTRA:-}" sdk target
+  local dir="$WORK/tiny/$1${TINY_SYMBOL:+-$TINY_SYMBOL}${TINY_EXTRA:+-$TINY_EXTRA}"
   case "$kind" in
     mac) sdk=macosx; target="arm64-apple-macos$MACOS_MIN" ;;
     ios) sdk=iphoneos; target="arm64-apple-ios$IOS_MIN" ;;
@@ -23,6 +26,7 @@ tiny_lib() { # <kind> -> prints the path of $WORK/tiny/<kind>/libtiny.a, buildin
   if [ ! -f "$dir/libtiny.a" ]; then
     mkdir -p "$dir"
     printf 'int %s(void) { return 7; }\n' "$sym" >"$dir/tiny.c"
+    if [ -n "$extra" ]; then printf 'int %s(void) { return 8; }\n' "$extra" >>"$dir/tiny.c"; fi
     xcrun --sdk "$sdk" clang -c -O0 -target "$target" -isysroot "$(xcrun --sdk "$sdk" --show-sdk-path)" "$dir/tiny.c" -o "$dir/tiny.o"
     ar rcs "$dir/libtiny.a" "$dir/tiny.o" 2>/dev/null
   fi

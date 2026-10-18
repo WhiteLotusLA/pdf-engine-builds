@@ -52,11 +52,18 @@ add_pdfium_headers() { # <xcframework>: the layout the contract fixes (module ma
     printf 'typedef int FPDF_FAKE;\n' >"$d/PDFium/PDFium.h"
   done
 }
+anchor_of() { # <engine name>: the symbol release-publish.sh requires that engine's archive to define (without the leading _)
+  case "$1" in
+    PDFium) echo FPDF_InitLibrary ;;
+    QPDF) echo qpdf_init ;;
+  esac
+}
 zip_framework() { # <dist dir> <name> <slice kinds...>
   local dist="$1" name="$2"
   shift 2
-  # each engine gets its own symbol, as the real archives must (release-publish.sh refuses a shared one)
-  TINY_SYMBOL="qb_$name" tiny_framework "$WORK/build/$name.xcframework" yes "$@"
+  # each engine gets its own symbol, as the real archives must (release-publish.sh refuses a shared one),
+  # plus the anchor symbol the gate requires (FPDF_InitLibrary in PDFium, qpdf_init in QPDF)
+  TINY_SYMBOL="qb_$name" TINY_EXTRA="$(anchor_of "$name")" tiny_framework "$WORK/build/$name.xcframework" yes "$@"
   if [ "$name" = "PDFium" ]; then add_pdfium_headers "$WORK/build/$name.xcframework"; fi
   rm -f "$dist/$name.xcframework.zip"
   ditto -c -k --keepParent "$WORK/build/$name.xcframework" "$dist/$name.xcframework.zip"
@@ -191,12 +198,44 @@ check "a PDFium.h left at the Headers root aborts the release" $([ "$code" -eq 1
 # PDFium and QPDF define the same symbol (two copies of one library, such as libjpeg)
 BAD="$WORK/shared-symbol"
 full_dist "$BAD"
-TINY_SYMBOL=qb_PDFium tiny_framework "$WORK/build/QPDF.xcframework" yes mac ios sim
+TINY_SYMBOL=qb_PDFium TINY_EXTRA=qpdf_init tiny_framework "$WORK/build/QPDF.xcframework" yes mac ios sim
 rm -f "$BAD/QPDF.xcframework.zip"
 ditto -c -k --keepParent "$WORK/build/QPDF.xcframework" "$BAD/QPDF.xcframework.zip"
 write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
 publish "$BAD" "$TAG"
 check "a symbol defined by both PDFium and QPDF aborts the release" $([ "$code" -eq 1 ] && grep -q "both define 1 symbol(s) in slice" <<<"$out" && no_create; echo $?)
+
+# nm fails on an archive: a tool error must refuse, never pass as "no symbol in common"
+mkdir -p "$WORK/nm-fails" "$WORK/nm-silent"
+printf '#!/usr/bin/env bash\necho "nm: error: cannot read this archive" >&2\nexit 1\n' >"$WORK/nm-fails/nm"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$WORK/nm-silent/nm"
+chmod +x "$WORK/nm-fails/nm" "$WORK/nm-silent/nm"
+PATH="$WORK/nm-fails:$PATH" publish "$FULL" "$TAG" --dry-run
+check "a failing nm aborts the release (exit 1, names nm and the archive)" $([ "$code" -eq 1 ] && grep -q "nm failed on .*libtiny.a" <<<"$out" && ! grep -q "all checks passed" <<<"$out"; echo $?)
+PATH="$WORK/nm-fails:$PATH" publish "$FULL" "$TAG"
+check "a failing nm never reaches gh release create" $(no_create; echo $?)
+# nm exits 0 but lists nothing: an empty definition list must refuse too
+PATH="$WORK/nm-silent:$PATH" publish "$FULL" "$TAG" --dry-run
+check "an nm that lists no definitions aborts the release (exit 1)" $([ "$code" -eq 1 ] && grep -q "nm lists no defined symbol in .*libtiny.a" <<<"$out"; echo $?)
+
+# an archive without its engine's anchor symbol is not the engine it claims to be
+BAD="$WORK/no-qpdf-anchor"
+full_dist "$BAD"
+TINY_SYMBOL=qb_QPDF tiny_framework "$WORK/build/QPDF.xcframework" yes mac ios sim
+rm -f "$BAD/QPDF.xcframework.zip"
+ditto -c -k --keepParent "$WORK/build/QPDF.xcframework" "$BAD/QPDF.xcframework.zip"
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+publish "$BAD" "$TAG" --dry-run
+check "a QPDF archive that does not define _qpdf_init aborts the release (exit 1)" $([ "$code" -eq 1 ] && grep -q "does not define _qpdf_init" <<<"$out"; echo $?)
+BAD="$WORK/no-pdfium-anchor"
+full_dist "$BAD"
+TINY_SYMBOL=qb_PDFium tiny_framework "$WORK/build/PDFium.xcframework" yes mac ios sim
+add_pdfium_headers "$WORK/build/PDFium.xcframework"
+rm -f "$BAD/PDFium.xcframework.zip"
+ditto -c -k --keepParent "$WORK/build/PDFium.xcframework" "$BAD/PDFium.xcframework.zip"
+write_checksums "$BAD" PDFium.xcframework.zip QPDF.xcframework.zip LICENSES.zip
+publish "$BAD" "$TAG" --dry-run
+check "a PDFium archive that does not define _FPDF_InitLibrary aborts the release (exit 1)" $([ "$code" -eq 1 ] && grep -q "does not define _FPDF_InitLibrary" <<<"$out"; echo $?)
 
 # LICENSES.zip without the pdfium-binaries MIT text (the iOS patch header promises it)
 BAD="$WORK/no-mit"

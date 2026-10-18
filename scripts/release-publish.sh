@@ -15,7 +15,8 @@
 #      umbrella header in Headers/PDFium/, no PDFium.h at the Headers root)
 #   4. in every slice, libpdfium.a and libqpdf.a define no symbol in common: both carry a libjpeg, and in a
 #      static link the first archive that defines a name wins, so a shared name could silently bind qpdf to
-#      PDFium's copy (or the other way round) with no link error
+#      PDFium's copy (or the other way round) with no link error. nm failing, listing no definitions, or not
+#      listing the engine's anchor symbol (_FPDF_InitLibrary in PDFium, _qpdf_init from qpdf's C API) refuses.
 #   5. LICENSES.zip holds a README.txt, the PDFium notices, the pdfium-binaries MIT text and the qpdf notices
 # With --dry-run it stops there. Otherwise it creates a DRAFT release with the assets, compares the
 # SHA-256 GitHub computed for each uploaded asset with the local one, and only then publishes the
@@ -105,8 +106,16 @@ if [ -n "$QPDF_SLICES" ]; then
 fi
 
 # --- 4. no symbol defined by both engines ---
-defs() { # <archive>: every non-weak external or private external definition, one name per line
-  nm -m "$1" 2>/dev/null | grep -E ' (private )?external ' | grep -v -e ' weak ' -e '(undefined)' | awk '{print $NF}' | sort -u
+defs() { # <archive> <anchor symbol> <out file>: writes every non-weak external or private external definition,
+  # one name per line, sorted under LC_ALL=C. nm runs on its own, never in a pipe or a process substitution, so
+  # its failure refuses the release; an empty list or a missing anchor symbol (one the engine's public API always
+  # defines) refuses too, because "no symbol in common" means nothing unless both lists are real.
+  local lib="$1" anchor="$2" out="$3"
+  nm -m "$lib" >"$out.nm" 2>"$out.err" || die 1 "nm failed on $lib: $(head -1 "$out.err")"
+  { grep -E ' (private )?external ' "$out.nm" || true; } | { grep -v -e ' weak ' -e '(undefined)' || true; } \
+    | awk '{print $NF}' | LC_ALL=C sort -u >"$out"
+  [ -s "$out" ] || die 1 "nm lists no defined symbol in $lib; refusing to call the symbol check passed"
+  grep -qx -- "$anchor" "$out" || die 1 "$lib does not define $anchor, so it is not the archive this release must ship"
 }
 slice_lib() { # <slice dir>: prints the static library inside it
   local f
@@ -117,7 +126,9 @@ slice_lib() { # <slice dir>: prints the static library inside it
 for id in $QPDF_SLICES; do
   plib="$(slice_lib "$TMP/PDFium/PDFium.xcframework/$id")" && qlib="$(slice_lib "$TMP/QPDF/QPDF.xcframework/$id")" \
     || die 1 "slice $id: no static library in PDFium.xcframework or QPDF.xcframework"
-  both="$(comm -12 <(defs "$plib") <(defs "$qlib"))"
+  defs "$plib" _FPDF_InitLibrary "$TMP/pdfium-$id.defs"
+  defs "$qlib" _qpdf_init "$TMP/qpdf-$id.defs"
+  both="$(LC_ALL=C comm -12 "$TMP/pdfium-$id.defs" "$TMP/qpdf-$id.defs")"
   [ -z "$both" ] || die 1 "PDFium and QPDF both define $(printf '%s\n' "$both" | wc -l | tr -d ' ') symbol(s) in slice $id (first: $(printf '%s\n' "$both" | head -1)); rename or drop one copy in scripts/qpdf-build.sh"
 done
 
