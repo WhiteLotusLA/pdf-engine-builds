@@ -12,11 +12,13 @@
 #     the pdfium target compiles it
 #   - compiler-rt's builtins archive from the clang package (third_party/llvm-build), which ninja lists as an
 #     input of pdfium, stages no notice while nm shows the built library defines none of its symbols (all three
-#     slices' archive names); a library that does define one, a missing library or archive, or a library
-#     without _FPDF_InitLibrary fails the run; any other llvm-build file counts as unknown
+#     slices' archive names); a library that does define one, a missing library or archive, an archive nm cannot
+#     read or that defines nothing, or a library without _FPDF_InitLibrary fails the run; any other llvm-build
+#     file counts as unknown
 #   - an unknown library fails the run and is named, whether build.ninja names it or the pdfium target compiles
 #     it under a label outside //third_party; an empty or uppercase name counts as unknown; two unknown names
-#     are both reported, each with an example, before the run fails
+#     are both reported, each with an example, before the run fails, and so are missing notice files, a compiled
+#     ignored library and linked compiler-rt met in the same run (one run shows the whole set)
 #   - a build graph with no library, an empty build.ninja, a missing ninja, compiled Skia objects without a
 #     Skia notice, a missing always-linked notice, or a missing notice file fail the run
 #   - assemble writes README.txt, the notices and a zip, merges PDFium stage dirs with different library
@@ -329,7 +331,7 @@ tiny_archive() { # <archive> <C source>
   xcrun --sdk macosx clang -c -O0 -arch arm64 "$dir/x.c" -o "$dir/x.o"
   mkdir -p "$(dirname "$1")"
   rm -f "$1"
-  xcrun libtool -static -o "$1" "$dir/x.o"
+  xcrun libtool -static -no_warning_for_no_symbols -o "$1" "$dir/x.o"
 }
 RT_DIR="$SRC/third_party/llvm-build/Release+Asserts/lib/clang/24/lib/darwin"
 tiny_archive "$RT_DIR/libclang_rt.osx.a" 'long long rt_udivti3(long long a, long long b) { return a / b; }
@@ -404,6 +406,22 @@ V="$(variant llvm-other)"
 printf '%s\n' "${PDFIUM_LINK/ || / ../../third_party/llvm-build/Release+Asserts/lib/libLLVMSupport.a || }" >"$V/obj/pdfium.ninja"
 expect_exit "an llvm-build file other than compiler-rt's builtins archive fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
 check "the failure names llvm-build and that file" $(grep -q "unknown third_party library 'llvm-build'.*libLLVMSupport.a" <<<"$out"; echo $?)
+check "the builtins archive beside it is still checked in the same round" $(grep -q "defines none of the 2 symbols of $CLANG_RT" <<<"$out"; echo $?)
+
+# The nm proof refuses archives it cannot read: an nm error, or no defined symbol to compare against. Each case
+# uses its own clang version directory, so the archive of the other cases stays intact.
+V="$(variant llvm-nm-fails)"
+mkdir -p "$SRC/third_party/llvm-build/Release+Asserts/lib/clang/98/lib/darwin"
+printf 'not an archive\n' >"$SRC/third_party/llvm-build/Release+Asserts/lib/clang/98/lib/darwin/libclang_rt.osx.a"
+printf '%s\n' "$PDFIUM_LINK" | sed 's|/clang/24/|/clang/98/|' >"$V/obj/pdfium.ninja"
+expect_exit "a compiler-rt archive nm cannot read fails the run" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure says nm failed on that archive" $(grep -q "nm failed on .*/clang/98/lib/darwin/libclang_rt.osx.a" <<<"$out"; echo $?)
+
+V="$(variant llvm-no-definition)"
+tiny_archive "$SRC/third_party/llvm-build/Release+Asserts/lib/clang/99/lib/darwin/libclang_rt.osx.a" '__attribute__((used)) static int rt_local(void) { return 1; }'
+printf '%s\n' "$PDFIUM_LINK" | sed 's|/clang/24/|/clang/99/|' >"$V/obj/pdfium.ninja"
+expect_exit "a compiler-rt archive with no external definition fails the run (no symbol to compare)" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure says nm lists no defined symbol in that archive" $(grep -q "nm lists no defined symbol in .*/clang/99/lib/darwin/libclang_rt.osx.a" <<<"$out"; echo $?)
 
 V="$(variant llvm-profile)"
 printf '%s\n' "${PDFIUM_LINK/ || / ../../third_party/llvm-build/Release+Asserts/lib/clang/24/lib/darwin/libclang_rt.profile_osx.a || }" >"$V/obj/pdfium.ninja"
@@ -435,6 +453,35 @@ expect_exit "two unknown libraries fail the run (exit 1)" 1 "$LIC" stage-pdfium 
 check "the failure names both unknown libraries, each with an example (not only the first)" \
   $(grep -q "unknown third_party library 'mystery_vendored'.*third_party/mystery_vendored/mystery.cc" <<<"$out" && grep -q "unknown third_party library 'mystery_lib'.*build third_party/mystery_lib" <<<"$out"; echo $?)
 check "the failure counts them" $(grep -qF "2 third_party name(s) that scripts/licenses.sh does not know" <<<"$out"; echo $?)
+
+# Every problem the read of the names meets is listed before the run stops, whatever its kind: unknown names, a
+# missing notice file (copied, or cut from a source header), an ignored library the pdfium target compiles.
+V="$(variant unknowns-and-missing-notices)"
+printf 'build third_party/mystery_lib$:mystery: phony phony/third_party/mystery_lib/mystery\n' >>"$V/build.ninja"
+printf 'build obj/core/fxcrt/fxcrt/mystery.o: cxx ../../third_party/mystery_vendored/mystery.cc\n' >>"$V/obj/core/fxcrt/fxcrt.ninja"
+printf '%s\n' "${PDFIUM_LINK/ || / obj/core/fxcrt/fxcrt/mystery.o obj/third_party/googletest/libgtest.a || }" >"$V/obj/pdfium.ninja"
+mv "$SRC/third_party/dragonbox/src/LICENSE-Boost" "$SRC/third_party/dragonbox/src/LICENSE-Boost.gone"
+mv "$SRC/third_party/agg23/agg_array.h" "$SRC/third_party/agg23/agg_array.h.gone"
+expect_exit "unknown names, missing notice files and a compiled ignored library fail the run (exit 1)" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names both unknown libraries, each with an example" \
+  $(grep -q "unknown third_party library 'mystery_vendored'.*third_party/mystery_vendored/mystery.cc" <<<"$out" && grep -q "unknown third_party library 'mystery_lib'.*build third_party/mystery_lib" <<<"$out"; echo $?)
+check "the failure names the missing copied notice (dragonbox LICENSE-Boost)" $(grep -q "no notice file for dragonbox: expected .*/third_party/dragonbox/src/LICENSE-Boost" <<<"$out"; echo $?)
+check "the failure names the missing header notice (agg23), once though two names lead to it" \
+  $(grep -Eq "no notice file for (agg23|fx_agg): expected .*/third_party/agg23/agg_array.h" <<<"$out" && [ "$(grep -c "agg_array.h" <<<"$out")" -eq 1 ]; echo $?)
+check "the failure names the ignored library the pdfium target compiles (googletest)" $(grep -q "'googletest' is on IGNORED_THIRD_PARTY" <<<"$out"; echo $?)
+check "the failure counts the unknown names and all five problems" \
+  $(grep -qF "2 third_party name(s) that scripts/licenses.sh does not know" <<<"$out" && grep -qF "5 problem(s)" <<<"$out"; echo $?)
+mv "$SRC/third_party/dragonbox/src/LICENSE-Boost.gone" "$SRC/third_party/dragonbox/src/LICENSE-Boost"
+mv "$SRC/third_party/agg23/agg_array.h.gone" "$SRC/third_party/agg23/agg_array.h"
+
+# The compiler-rt check runs in the same round: a linked archive and an unknown name are both reported.
+V="$(variant llvm-merged-and-unknown)"
+tiny_archive "$V/obj/libembedpdf.a" 'long long rt_udivti3(long long a, long long b) { return a / b; }
+int FPDF_InitLibrary(void) { return (int)rt_udivti3(6, 3); }'
+printf 'build third_party/mystery_lib$:mystery: phony phony/third_party/mystery_lib/mystery\n' >>"$V/build.ninja"
+expect_exit "linked compiler-rt plus an unknown name fails the run (exit 1)" 1 "$LIC" stage-pdfium "$SRC" "$V" "$WORK/stage2"
+check "the failure names the unknown library and the linked compiler-rt" \
+  $(grep -q "unknown third_party library 'mystery_lib'" <<<"$out" && grep -q "compiler-rt is linked into .*libembedpdf.a" <<<"$out"; echo $?)
 
 V="$(variant uppercase)"
 printf 'build third_party/Skia2: phony obj/x\n' >>"$V/build.ninja"
