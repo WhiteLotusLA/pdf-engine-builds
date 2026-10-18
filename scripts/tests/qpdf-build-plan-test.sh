@@ -136,6 +136,13 @@ set -e
 check "an xcframework with a missing slice exits 3 and names the slice" $([ "$code" -eq 3 ] && has "$out" "missing slice ios-arm64"; echo $?)
 check "no xcframework or zip was produced" $([ ! -e "$WORK/partial-dist/QPDF.xcframework" ] && [ ! -e "$WORK/partial-dist/QPDF.xcframework.zip" ]; echo $?)
 
+# --- workflow wiring (S11 "Pass for the Mac only" needs the macOS slice smoke in qpdf-slice) ---
+WF="$REPO/.github/workflows/build.yml"
+slice_job="$(awk '/^  qpdf-slice:/{p=1; next} /^  [a-z][a-z-]*:/{p=0} p' "$WF")"
+check "qpdf-slice smoke-tests the macOS slice alone" $(has "$slice_job" "Smoke test against the macOS slice alone" && has "$slice_job" "smoke/qpdf/run-smoke.sh macos-arm64 out/qpdf"; echo $?)
+check "that smoke step only runs for the macOS leg" $(grep -A2 'Smoke test against the macOS slice alone' <<<"$slice_job" | grep -qF "if: matrix.slice == 'macos-arm64'"; echo $?)
+check "the GnuTLS install step turns off Homebrew auto-update" $(grep -A4 'Install GnuTLS on purpose' <<<"$slice_job" | grep -qF "HOMEBREW_NO_AUTO_UPDATE"; echo $?)
+
 if [ "$failures" -gt 0 ]; then
   echo "qpdf-build-plan-test: $failures failure(s)"
   exit 1

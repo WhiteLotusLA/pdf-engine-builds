@@ -15,7 +15,7 @@ on:
   workflow_call:
     inputs:
       include_patched:
-        description: Also build and test the EmbedPDF-patched variant
+        description: Also build and test the EmbedPDF-patched variant (it also gates the qpdf jobs)
         type: boolean
         default: true
 
@@ -310,9 +310,14 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
       - name: Install GnuTLS on purpose (the build must ignore it)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
         run: brew list gnutls >/dev/null 2>&1 || brew install gnutls
       - name: Build libjpeg-turbo and qpdf for ${{ matrix.slice }}
         run: scripts/qpdf-build.sh ${{ matrix.slice }}
+      - name: Smoke test against the macOS slice alone
+        if: matrix.slice == 'macos-arm64'
+        run: smoke/qpdf/run-smoke.sh macos-arm64 out/qpdf
       - name: Native crypto survives a poisoned environment
         if: matrix.slice == 'macos-arm64'
         run: scripts/tests/qpdf-poison-ci.sh
