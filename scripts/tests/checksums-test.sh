@@ -54,5 +54,15 @@ check "verify without checksums.txt exits 1" $([ "$code" -eq 1 ]; echo $?)
 run bogus
 check "an unknown command exits 2" $([ "$code" -eq 2 ]; echo $?)
 
+# a malformed line beside a good one must not pass (shasum -c skips improperly formatted lines unless --strict)
+printf 'alpha' >"$WORK/d/PDFium.xcframework.zip"
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+printf 'this line is not a checksum line\n' >>"$WORK/d/checksums.txt"
+run verify "$WORK/d"
+check "verify fails on a malformed line beside good ones (exit 1)" $([ "$code" -eq 1 ] && grep -q "checksum verification failed" <<<"$out"; echo $?)
+run write "$WORK/d" PDFium.xcframework.zip QPDF.xcframework.zip
+run verify "$WORK/d"
+check "verify passes again on a clean checksums.txt" $([ "$code" -eq 0 ]; echo $?)
+
 if [ "$failures" -gt 0 ]; then echo "checksums-test: $failures failure(s)"; exit 1; fi
 echo "checksums-test: all passed"
