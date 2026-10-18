@@ -4,8 +4,10 @@
 # Decides whether the PDFium pin in versions.env is due for a refresh. The pin is due when
 #   (a) a newer upstream chromium/NNNN branch exists AND the pin was adopted REFRESH_MAX_AGE_DAYS
 #       (default 90) or more days ago, or
-#   (b) a Chrome release note published after the pin date lists a security fix "in PDFium" (older
-#       notes) or "in PDF" (the component name Chrome uses now).
+#   (b) a post on the Chrome Releases blog published after the pin date lists a security fix "in PDFium"
+#       (older notes) or "in PDF" (the component name Chrome uses now). Every post counts, not only the
+#       stable desktop notes: the blog also carries ChromeOS and LTS notes, and a PDFium fix in any of them
+#       means the pinned PDFium is behind a fix.
 # A pin that is still the newest branch is never "too old" on age alone. If the data cannot be
 # fetched or read the script fails (exit 3): a check that could not run must not look like a pass.
 #
@@ -93,6 +95,12 @@ date_before() {
   [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | sed -n 1p)" = "$1" ]
 }
 
+# why_note: " (<reason>)" for an error message about page 2 or up, whose reason the loop below keeps in WHY;
+# nothing for page 1, which needs no reason (an empty "()" would only look like a lost message).
+why_note() {
+  [ -z "${WHY:-}" ] || printf ' (%s)' "$WHY"
+}
+
 # fetch_feed_page N SEEN OUTFILE: page N of the feed, SEEN being the number of entries read so far.
 # WHY (set by the loop below for page 2 and up) says why the page is needed, for the error messages.
 fetch_feed_page() {
@@ -101,9 +109,9 @@ fetch_feed_page() {
     if [ "$n" -eq 1 ]; then
       cp "$REFRESH_FEED_FILE" "$out" || die 3 "cannot read $REFRESH_FEED_FILE"
     else
-      [ -n "${REFRESH_FEED_PAGES_PREFIX:-}" ] || die 3 "the Chrome Releases feed has no page $n to read (${WHY:-})"
+      [ -n "${REFRESH_FEED_PAGES_PREFIX:-}" ] || die 3 "the Chrome Releases feed has no page $n to read$(why_note)"
       cp "${REFRESH_FEED_PAGES_PREFIX}${n}.xml" "$out" 2>/dev/null \
-        || die 3 "cannot read page $n of the Chrome Releases feed (${WHY:-})"
+        || die 3 "cannot read page $n of the Chrome Releases feed$(why_note)"
     fi
     return 0
   fi
@@ -115,7 +123,7 @@ fetch_feed_page() {
   fi
   # --proto-redir =https: a redirect to plain http is refused, never followed.
   curl -fsSL --proto-redir =https --max-time 60 "$url" >"$out" \
-    || die 3 "could not download page $n of the Chrome Releases feed (${WHY:-})"
+    || die 3 "could not download page $n of the Chrome Releases feed$(why_note)"
 }
 
 # parse_feed_page FILE: one line per fact about the entries of one feed page:
@@ -192,7 +200,10 @@ if [ -n "$SECURITY_DATES" ]; then
   else
     remedy="The pin is already the newest upstream branch (chromium/$PINNED), so there is nothing to move to yet; this stays red until a newer chromium branch exists and the pin moves to it."
   fi
-  reasons="$reasons- Chrome stable release notes dated ${SECURITY_DATES% } list a security fix in PDF or PDFium after the pin date $PIN_DATE. $remedy
+  # The feed is the Chrome Releases blog, which carries ChromeOS and LTS notes besides the stable desktop ones;
+  # the check reads them all on purpose (a PDFium fix is a PDFium fix wherever it ships), so the message must
+  # not call the hit a stable release note.
+  reasons="$reasons- Chrome Releases blog posts dated ${SECURITY_DATES% } mention a security fix in PDF or PDFium after the pin date $PIN_DATE (any post counts, ChromeOS and LTS notes included). $remedy
 "
 fi
 

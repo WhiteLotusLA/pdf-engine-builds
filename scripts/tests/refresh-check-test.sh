@@ -13,7 +13,7 @@ failures=0
 # On a CI runner GITHUB_STEP_SUMMARY is already set; a due-refresh case here would write an invented
 # "PDFium refresh is due" block into the real job summary. Nothing inherited may leak into these runs.
 unset GITHUB_STEP_SUMMARY PDFIUM_BRANCH VERSIONS_FILE REFRESH_BRANCHES_FILE REFRESH_FEED_FILE REFRESH_FEED_PAGES_PREFIX \
-  REFRESH_PIN_DATE REFRESH_TODAY REFRESH_MAX_AGE_DAYS REFRESH_FEED_URL PDFIUM_URL
+  REFRESH_PIN_DATE REFRESH_TODAY REFRESH_MAX_AGE_DAYS REFRESH_FEED_MAX_PAGES REFRESH_FEED_URL PDFIUM_URL
 
 check() { # <label> <0 when the condition held>
   if [ "$2" -eq 0 ]; then echo "ok:   $1"; else echo "FAIL: $1"; failures=$((failures + 1)); fi
@@ -76,6 +76,13 @@ check "a Chrome security note about PDFium after the pin date: refresh due (exit
 
 run "$WORK/branches-current.txt" "$WORK/feed-security-pdf.xml" 2026-07-01 2026-10-09
 check "a note that says 'in PDF' (Chrome's current component name) counts too (exit 1)" $([ "$code" -eq 1 ] && grep -q "security fix in PDF or PDFium" <<<"$out"; echo $?)
+
+# The feed is the Chrome Releases blog, which also carries ChromeOS and LTS notes; the check matches them on
+# purpose, so the message must name the blog and say so, not claim the hit is a stable desktop release note.
+check "the security message names the Chrome Releases blog and the dated posts (exit 1)" \
+  $([ "$code" -eq 1 ] && grep -q "Chrome Releases blog posts dated 2026-09-20 mention a security fix in PDF or PDFium after the pin date 2026-07-01" <<<"$out"; echo $?)
+check "the security message says ChromeOS and LTS notes count too, and no longer says 'stable release notes'" \
+  $(grep -q "ChromeOS and LTS" <<<"$out" && ! grep -qi "stable release note" <<<"$out"; echo $?)
 
 run "$WORK/branches-current.txt" "$WORK/feed-lookalike.xml" 2026-07-01 2026-10-09
 check "words that only start with 'in PDF' (in PDFs, in PDFKit) are not a security note (exit 0)" $([ "$code" -eq 0 ]; echo $?)
@@ -151,7 +158,7 @@ check "paging: a page limit that is reached before the pin date fails loudly (ex
 # --- the real download path (X1), with a fake download tool first on PATH ---
 # The fake logs its arguments and serves $FAKE_PAGES/start-<N>.xml, N being the start-index in the URL (1 when
 # there is none); anything else fails the way a failed download does.
-mkdir -p "$WORK/bin" "$WORK/net-reach" "$WORK/net-page" "$WORK/net-fail"
+mkdir -p "$WORK/bin" "$WORK/net-reach" "$WORK/net-page" "$WORK/net-fail" "$WORK/net-none"
 cat >"$WORK/bin/curl" <<'FAKE'
 #!/usr/bin/env bash
 url=""
@@ -187,6 +194,12 @@ check "every page download refuses a redirect to plain http" $([ "$(grep -c -e '
 
 run_net "$WORK/net-fail"
 check "a page whose download fails stops the check loudly (exit 3)" $([ "$code" -eq 3 ] && grep -q "could not download" <<<"$out"; echo $?)
+check "a failing page 2 download says why page 2 was needed" $(grep -q "could not download page 2 of the Chrome Releases feed (page 2 is needed because the oldest entry read so far, dated 2026-09-10," <<<"$out"; echo $?)
+
+# The very first download has no reason to give: the message must end cleanly, never in empty parentheses.
+run_net "$WORK/net-none"
+check "a failing page 1 download stops the check loudly (exit 3, a clean message)" \
+  $([ "$code" -eq 3 ] && grep -q "error: could not download page 1 of the Chrome Releases feed$" <<<"$out" && ! grep -qF '()' <<<"$out"; echo $?)
 
 # --- branch numbers compare as numbers, not as text (R7): chromium/10000 is newer than chromium/9999 ---
 printf 'PDFIUM_BRANCH=chromium/9999\n' >"$WORK/versions-9999.env"

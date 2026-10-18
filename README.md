@@ -131,14 +131,16 @@ at it on the Releases page, delete it by hand, and only then re-run.
 
 ## Refreshing PDFium
 
-The build repo moves to a newer PDFium release at least every 90 days, and sooner when a Chrome stable
-release note lists a PDFium security fix. `refresh-check.yml` runs `scripts/refresh-check.sh` every Monday. The
+The build repo moves to a newer PDFium release at least every 90 days, and sooner when a post on the Chrome
+Releases blog lists a PDFium security fix. `refresh-check.yml` runs `scripts/refresh-check.sh` every Monday. The
 run fails, the reason is in the job summary and GitHub emails the repository owner, when a newer `chromium/NNNN`
-branch exists and the pin is 90 or more days old, or when a Chrome stable release note dated after the pin
-lists a security fix in PDF or PDFium. The check reads the Chrome Releases feed page by page back to the day the
-pin was adopted, and it fails instead of reporting "no refresh due" when it cannot read the feed, its dates or
-the git history (it needs a full clone, `fetch-depth: 0`). A security reason clears only when the pin moves to
-a newer branch; rebuilding the same branch does not clear it.
+branch exists and the pin is 90 or more days old, or when a Chrome Releases blog post dated after the pin
+mentions a security fix in PDF or PDFium. Every post counts, not only the stable desktop notes: the blog also
+carries ChromeOS and LTS notes, and a PDFium fix in any of them means the pinned PDFium is behind a fix. The
+check reads the blog's feed page by page back to the day the pin was adopted, and it fails instead of reporting
+"no refresh due" when it cannot read the feed, its dates or the git history (it needs a full clone,
+`fetch-depth: 0`). A security reason clears only when the pin moves to a newer branch; rebuilding the same
+branch does not clear it.
 
 To refresh:
 
