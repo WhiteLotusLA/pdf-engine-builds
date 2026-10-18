@@ -19,7 +19,8 @@
 #   QB_ALLOW_IMPLICIT_CRYPTO=1   TESTS ONLY. Configure the way upstream does by default (implicit
 #                                crypto providers, pkg-config not isolated) so tests can show the
 #                                guard catches a runner that has GnuTLS or OpenSSL installed.
-# Exit codes: 0 ok, 2 usage or missing tool or pin, 3 checksum mismatch, 4 crypto guard failed,
+# Exit codes: 0 ok, 1 a cmake, gh, tar or libtool command failed (set -e passes its failure on),
+#             2 usage or missing tool or pin, 3 checksum mismatch, 4 crypto guard failed,
 #             5 build output missing or built for the wrong platform.
 set -euo pipefail
 

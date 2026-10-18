@@ -45,6 +45,8 @@ mkarchive gnutls  'extern int gnutls_cipher_init(void); int qb_use(void) { retur
 mkarchive openssl 'extern int OPENSSL_init_crypto(void); int qb_use(void) { return OPENSSL_init_crypto(); }'
 mkarchive evp     'extern int EVP_MD_CTX_new(void); int qb_use(void) { return EVP_MD_CTX_new(); }'
 mkarchive gnutlsclass 'int QPDFCrypto_gnutls_stub(void) { return 0; }'
+mkarchive opensslclass 'int QPDFCrypto_openssl_stub(void) { return 0; }'
+mkarchive randbytes 'extern int RAND_bytes(unsigned char *buf, int num); int qb_use(void) { return RAND_bytes(0, 0); }'
 
 # --- check-no-tls-symbols.sh ---------------------------------------------------------------
 expect_exit "clean archive passes" 0 "$NMCHECK" "$WORK/clean.a"
@@ -53,6 +55,8 @@ check "the failure names the symbol" $(grep -q "gnutls_cipher_init" <<<"$out"; e
 expect_exit "an OpenSSL OPENSSL_ reference fails" 1 "$NMCHECK" "$WORK/openssl.a"
 expect_exit "an OpenSSL EVP_ reference fails" 1 "$NMCHECK" "$WORK/evp.a"
 expect_exit "the qpdf GnuTLS provider class fails" 1 "$NMCHECK" "$WORK/gnutlsclass.a"
+expect_exit "the qpdf OpenSSL provider class fails" 1 "$NMCHECK" "$WORK/opensslclass.a"
+expect_exit "an OpenSSL RAND_bytes reference fails" 1 "$NMCHECK" "$WORK/randbytes.a"
 expect_exit "one bad archive among clean ones fails" 1 "$NMCHECK" "$WORK/clean.a" "$WORK/gnutls.a" "$WORK/native.a"
 expect_exit "--require-native passes when the native provider is present" 0 "$NMCHECK" --require-native "$WORK/native.a"
 expect_exit "--require-native fails when no crypto provider is present" 1 "$NMCHECK" --require-native "$WORK/clean.a"

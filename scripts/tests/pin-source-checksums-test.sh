@@ -61,6 +61,8 @@ run "none"
 check "an asset without a digest exits 3" $([ "$code" -eq 3 ]; echo $?)
 
 if [ "$failures" -gt 0 ]; then
+  echo "last script output:"
+  printf '%s\n' "$out"
   echo "pin-source-checksums-test: $failures failure(s)"
   exit 1
 fi

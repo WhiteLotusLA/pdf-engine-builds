@@ -37,6 +37,10 @@ Cflags: -I\${includedir}
 PC
 done
 
+# Empty stand-in libraries, so the poison does not depend on pkg-config or on Homebrew's GnuTLS.
+: >"$POISON/lib/libgnutls.dylib"
+: >"$POISON/lib/libcrypto.dylib"
+
 export PKG_CONFIG_PATH="$POISON/lib/pkgconfig"
 export CPATH="$POISON/include"
 export LIBRARY_PATH="$POISON/lib"
