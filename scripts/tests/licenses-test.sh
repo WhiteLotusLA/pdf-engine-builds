@@ -454,7 +454,8 @@ check "a stale file in dist/LICENSES from an earlier run is gone, also from the 
 
 # Two PDFium stage dirs (for example macOS and iOS) with different library sets: the release gets the union.
 mkdir -p "$WORK/stage-ios/pdfium"
-cp "$WORK/stage1/pdfium/pdfium.txt" "$WORK/stage1/pdfium/zlib.txt" "$WORK/stage-ios/pdfium/"
+cp "$WORK/stage1/pdfium/pdfium.txt" "$WORK/stage1/pdfium/zlib.txt" "$WORK/stage-ios/pdfium/" \
+  || check "the macOS stage dir has pdfium.txt and zlib.txt to copy" 1
 printf 'a notice only the iOS graph needs\n' >"$WORK/stage-ios/pdfium/ios-only.txt"
 expect_exit "assemble merges PDFium stage dirs with different library sets" 0 "$FLIC" assemble "$WORK/stage1" "$WORK/stage-ios"
 check "the merged notices are the union of both sets" $(cmp -s "$WORK/stage-ios/pdfium/ios-only.txt" "$WORK/dist/LICENSES/pdfium/ios-only.txt" && cmp -s "$WORK/stage1/pdfium/skia.txt" "$WORK/dist/LICENSES/pdfium/skia.txt"; echo $?)
