@@ -22,9 +22,9 @@ SLICE="$1"
 XCF="${2:-$ROOT/dist/QPDF.xcframework}"
 
 case "$SLICE" in
-  macos-arm64) ID=macos-arm64; SDK=macosx; TARGET="arm64-apple-macos$MACOS_MIN"; PLATFORM=MACOS; MODE=run ;;
-  ios-arm64) ID=ios-arm64; SDK=iphoneos; TARGET="arm64-apple-ios$IOS_MIN"; PLATFORM=IOS; MODE=link ;;
-  iossim-arm64) ID=ios-arm64-simulator; SDK=iphonesimulator; TARGET="arm64-apple-ios$IOS_MIN-simulator"; PLATFORM=IOSSIMULATOR; MODE=simulator ;;
+  macos-arm64) ID=macos-arm64; SDK=macosx; TARGET="arm64-apple-macos$MACOS_MIN"; PLATFORM=MACOS; MODE="run" ;;
+  ios-arm64) ID=ios-arm64; SDK=iphoneos; TARGET="arm64-apple-ios$IOS_MIN"; PLATFORM=IOS; MODE="link" ;;
+  iossim-arm64) ID=ios-arm64-simulator; SDK=iphonesimulator; TARGET="arm64-apple-ios$IOS_MIN-simulator"; PLATFORM=IOSSIMULATOR; MODE="simulator" ;;
   *) die 2 "unknown slice '$SLICE'" ;;
 esac
 
